@@ -214,6 +214,10 @@ def main():
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--image_size", type=int, default=224)
+    parser.add_argument("--weight_decay", type=float, default=1e-4)
+    parser.add_argument("--num_workers", type=int, default=2)
+    parser.add_argument("--patience", type=int, default=4)
+    parser.add_argument("--checkpoint_name", type=str, default="best_rgb_baseline.pt")
 
     # Multi-task loss weights.
     parser.add_argument("--lambda_fake", type=float, default=1.0)
@@ -261,7 +265,7 @@ def main():
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=2,
+        num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
     )
 
@@ -270,7 +274,7 @@ def main():
         val_dataset,
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=2,
+        num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
     )
 
@@ -287,11 +291,19 @@ def main():
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=args.lr,
-        weight_decay=1e-4,
+        weight_decay=args.weight_decay,
     )
 
-    # We save the checkpoint with the best validation fake accuracy.
-    best_val_fake_acc = 0.0
+    # Scheduler to lower the learning rate if validation loss doesn't improve. 
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=0.5,
+        patience=2,
+    )
+    # We save the checkpoint.
+    best_val_score = 0.0
+    epochs_without_improvement = 0
 
     # Main training loop.
     for epoch in range(args.epochs):
@@ -320,23 +332,45 @@ def main():
         print(f"Train: {train_metrics}")
         print(f"Val:   {val_metrics}")
 
-        # Save the model only if fake accuracy improved.
-        if val_metrics["fake_acc"] > best_val_fake_acc:
-            best_val_fake_acc = val_metrics["fake_acc"]
+        # Use a combined score because this is a multi-task model.
+        val_score = 0.5 * val_metrics["fake_acc"] + 0.5 * val_metrics["transform_acc"]
 
-            checkpoint_path = checkpoint_dir / "best_rgb_baseline.pt"
+        # Update the scheduler using validation loss.
+        scheduler.step(val_metrics["loss"])
+        current_lr = optimizer.param_groups[0]["lr"]
+        print(f"Val score: {val_score:.4f}")
+        print(f"Learning rate: {current_lr:.6f}")
+
+        # Save the model only if the combined validation score improved.
+        if val_score > best_val_score:
+            best_val_score = val_score
+            epochs_without_improvement = 0
+
+            checkpoint_path = checkpoint_dir / args.checkpoint_name
 
             torch.save(
                 {
                     "model_state_dict": model.state_dict(),
                     "epoch": epoch,
                     "val_metrics": val_metrics,
+                    "val_score": val_score,
                     "args": vars(args),
                 },
                 checkpoint_path,
             )
 
             print(f"Saved best checkpoint to {checkpoint_path}")
+        else:
+             # Count epochs without improvement for early stopping.
+            epochs_without_improvement += 1
+            print(
+                f"No improvement for {epochs_without_improvement}/"
+                f"{args.patience} epochs"
+            )
+
+            if epochs_without_improvement >= args.patience:
+                print("Early stopping triggered.")
+                break
 
 
 if __name__ == "__main__":
