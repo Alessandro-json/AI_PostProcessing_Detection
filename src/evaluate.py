@@ -52,14 +52,9 @@ def load_checkpoint(model, checkpoint_path, device):
     return model
 
 
-def evaluate_model(model, dataloader, device):
+def evaluate_model(model, dataloader, device, task):
     """
     Run the model on the test set and collect predictions.
-
-    The model produces two outputs:
-    - fake_logits: scores for real vs AI-generated
-    - transform_logits: scores for original vs transfer vs redigital
-
     We convert logits into predicted classes using argmax.
     """
 
@@ -78,92 +73,109 @@ def evaluate_model(model, dataloader, device):
 
             # Move image tensors and labels to GPU if available, otherwise CPU.
             images = batch["image"].to(device)
-            true_fake = batch["fake_label"].to(device)
-            true_transform = batch["transform_label"].to(device)
-
-            # Output is a dictionary with fake_logits and transform_logits.
+            
+            # Forward pass.
             outputs = model(images)
 
-            # Raw class scores for the two tasks.
-            fake_logits = outputs["fake_logits"]
-            transform_logits = outputs["transform_logits"]
+            # Real/fake predictions.
+            if task in ["fake", "multitask"]:
+                true_fake = batch["fake_label"].to(device)
+                fake_logits = outputs["fake_logits"]
+                pred_fake = torch.argmax(fake_logits, dim=1)
 
-            # Convert logits to predicted class ids.
-            pred_fake = torch.argmax(fake_logits, dim=1)
-            pred_transform = torch.argmax(transform_logits, dim=1)
+            # Transformation predictions.
+            if task in ["transform", "multitask"]:
+                true_transform = batch["transform_label"].to(device)
+                transform_logits = outputs["transform_logits"]
+                pred_transform = torch.argmax(transform_logits, dim=1)
 
             # Store predictions image by image.
             batch_size = images.size(0)
 
             for i in range(batch_size):
-                rows.append({
-                    # Useful for debugging wrong predictions.
+                row = {
                     "image_path": batch["image_path"][i],
+                }
 
-                    # Ground-truth and predicted label for task 1.
-                    "true_fake": int(true_fake[i].cpu()),
-                    "pred_fake": int(pred_fake[i].cpu()),
+                # Save real/fake prediction fields only when this task is active.
+                if task in ["fake", "multitask"]:
+                    row["true_fake"] = int(true_fake[i].cpu())
+                    row["pred_fake"] = int(pred_fake[i].cpu())
 
-                    # Ground-truth and predicted label for task 2.
-                    "true_transform": int(true_transform[i].cpu()),
-                    "pred_transform": int(pred_transform[i].cpu()),
-                })
+                # Save transformation prediction fields only when this task is active.
+                if task in ["transform", "multitask"]:
+                    row["true_transform"] = int(true_transform[i].cpu())
+                    row["pred_transform"] = int(pred_transform[i].cpu())
+
+                # For fake-only evaluation, we still store the true transformation label.
+                # This allows us to compute real/fake accuracy separately for:
+                # original, transmitted, and re-digitized images.
+                if task == "fake":
+                    row["true_transform"] = int(batch["transform_label"][i])
+
+                rows.append(row)
 
     # Convert collected rows into a DataFrame.
     # This makes metric computation and CSV export easier.
     return pd.DataFrame(rows)
 
 
-def compute_metrics(predictions_df):
+def compute_metrics(predictions_df, task):
     """
     Compute evaluation metrics from the predictions DataFrame.
-
-    We compute:
-    - global real/fake accuracy
-    - global real/fake macro F1
-    - global transformation accuracy
-    - global transformation macro F1
-    - real/fake accuracy separately for each transformation type
     """
+    metrics = {}
 
-    # Extract ground-truth and predicted labels for the real/fake task.
-    y_true_fake = predictions_df["true_fake"]
-    y_pred_fake = predictions_df["pred_fake"]
+    # Metrics for the real/fake task.
+    if task in ["fake", "multitask"]:
 
-    # Extract ground-truth and predicted labels for the transformation task.
-    y_true_transform = predictions_df["true_transform"]
-    y_pred_transform = predictions_df["pred_transform"]
+        y_true_fake = predictions_df["true_fake"]
+        y_pred_fake = predictions_df["pred_fake"]
 
-    # Global metrics for both tasks.
-    metrics = {
-        "fake_accuracy": accuracy_score(y_true_fake, y_pred_fake),
-        "fake_f1_macro": f1_score(y_true_fake, y_pred_fake, average="macro"),
+        metrics["fake_accuracy"] = accuracy_score(
+            y_true_fake,
+            y_pred_fake,
+        )
 
-        "transform_accuracy": accuracy_score(y_true_transform, y_pred_transform),
-        "transform_f1_macro": f1_score(
+        metrics["fake_f1_macro"] = f1_score(
+            y_true_fake,
+            y_pred_fake,
+            average="macro",
+            zero_division=0,
+        )
+
+        # Real/fake accuracy separately for each transformation class.
+        metrics["fake_accuracy_by_transform"] = {}
+
+        for transform_id, transform_name in enumerate(TRANSFORM_LABEL_NAMES):
+
+            # Select images belonging to one transformation category.
+            subset = predictions_df[predictions_df["true_transform"] == transform_id]
+
+            if len(subset) == 0:
+                metrics["fake_accuracy_by_transform"][transform_name] = None
+            else:
+                metrics["fake_accuracy_by_transform"][transform_name] = accuracy_score(
+                    subset["true_fake"],
+                    subset["pred_fake"],
+                )
+        # Metrics for the transformation task.
+    if task in ["transform", "multitask"]:
+
+        y_true_transform = predictions_df["true_transform"]
+        y_pred_transform = predictions_df["pred_transform"]
+
+        metrics["transform_accuracy"] = accuracy_score(
+            y_true_transform,
+            y_pred_transform,
+        )
+
+        metrics["transform_f1_macro"] = f1_score(
             y_true_transform,
             y_pred_transform,
             average="macro",
-        ),
-
-        # This dictionary will be filled below.
-        "fake_accuracy_by_transform": {},
-    }
-
-    # Compute real/fake accuracy separately for:
-    # 0 = original, 1 = transfer, 2 = redigital.
-    for transform_id, transform_name in enumerate(TRANSFORM_LABEL_NAMES):
-
-        # Select only images belonging to the current transformation class.
-        subset = predictions_df[predictions_df["true_transform"] == transform_id]
-
-        if len(subset) == 0:
-            metrics["fake_accuracy_by_transform"][transform_name] = None
-        else:
-            metrics["fake_accuracy_by_transform"][transform_name] = accuracy_score(
-                subset["true_fake"],
-                subset["pred_fake"],
-            )
+            zero_division=0,
+        )
 
     return metrics
 
@@ -206,15 +218,14 @@ def save_confusion_matrix(y_true, y_pred, labels, title, output_path):
     plt.close(fig)
 
 
-def save_results(predictions_df, metrics, output_dir):
+def save_results(predictions_df, metrics, output_dir, task):
     """
     Save all evaluation outputs.
 
     The function creates:
     - predictions.csv
     - metrics.json
-    - confusion_fake.png
-    - confusion_transform.png
+    - confusion_fake.png and/or confusion_transform.png
     """
 
     # Create output folder if it does not already exist.
@@ -231,26 +242,28 @@ def save_results(predictions_df, metrics, output_dir):
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=4)
 
-    # Save confusion matrix for real/fake prediction.
-    save_confusion_matrix(
-        y_true=predictions_df["true_fake"],
-        y_pred=predictions_df["pred_fake"],
-        labels=FAKE_LABEL_NAMES,
-        title="Real/Fake Confusion Matrix",
-        output_path=output_dir / "confusion_fake.png",
-    )
+    # Save confusion matrix for real/fake prediction only when available.
+    if task in ["fake", "multitask"]:
+        save_confusion_matrix(
+            y_true=predictions_df["true_fake"],
+            y_pred=predictions_df["pred_fake"],
+            labels=FAKE_LABEL_NAMES,
+            title="Real/Fake Confusion Matrix",
+            output_path=output_dir / "confusion_fake.png",
+        )
 
-    # Save confusion matrix for transformation prediction.
-    save_confusion_matrix(
-        y_true=predictions_df["true_transform"],
-        y_pred=predictions_df["pred_transform"],
-        labels=TRANSFORM_LABEL_NAMES,
-        title="Transformation Confusion Matrix",
-        output_path=output_dir / "confusion_transform.png",
-    )
+    # Save confusion matrix for transformation prediction only when available.
+    if task in ["transform", "multitask"]:
+        save_confusion_matrix(
+            y_true=predictions_df["true_transform"],
+            y_pred=predictions_df["pred_transform"],
+            labels=TRANSFORM_LABEL_NAMES,
+            title="Transformation Confusion Matrix",
+            output_path=output_dir / "confusion_transform.png",
+        )
 
 
-def print_metrics(metrics):
+def print_metrics(metrics, task):
     """
     Print the main metrics in the terminal.
     """
@@ -258,35 +271,46 @@ def print_metrics(metrics):
     print("\nEvaluation results")
     print("=" * 50)
 
-    # Global task metrics.
-    print(f"Fake accuracy:        {metrics['fake_accuracy']:.4f}")
-    print(f"Fake F1 macro:        {metrics['fake_f1_macro']:.4f}")
-    print(f"Transform accuracy:   {metrics['transform_accuracy']:.4f}")
-    print(f"Transform F1 macro:   {metrics['transform_f1_macro']:.4f}")
+    # Print real/fake metrics only when available.
+    if task in ["fake", "multitask"]:
+        print(f"Fake accuracy:        {metrics['fake_accuracy']:.4f}")
+        print(f"Fake F1 macro:        {metrics['fake_f1_macro']:.4f}")
 
-    # Per-transformation real/fake accuracy.
-    print("\nFake accuracy by transformation:")
+        print("\nFake accuracy by transformation:")
 
-    for name, value in metrics["fake_accuracy_by_transform"].items():
-        if value is None:
-            print(f"  {name}: not available")
-        else:
-            print(f"  {name}: {value:.4f}")
+        for name, value in metrics["fake_accuracy_by_transform"].items():
+            if value is None:
+                print(f"  {name}: not available")
+            else:
+                print(f"  {name}: {value:.4f}")
+
+    # Print transformation metrics only when available.
+    if task in ["transform", "multitask"]:
+        print(f"Transform accuracy:   {metrics['transform_accuracy']:.4f}")
+        print(f"Transform F1 macro:   {metrics['transform_f1_macro']:.4f}")
 
 
 def parse_args():
     """
     Read command-line arguments.
-
-    This allows us to run the same script with different:
-    - CSV files
-    - checkpoints
-    - output folders
-    - batch sizes
     """
 
     parser = argparse.ArgumentParser(
         description="Evaluate RGB multi-task baseline."
+    )
+
+    # Evaluation task.
+    parser.add_argument(
+        "--task",
+        type=str,
+        default="multitask",
+        choices=["fake", "transform", "multitask"],
+        help=(
+            "Evaluation task. "
+            "'fake' evaluates only the real/fake head. "
+            "'transform' evaluates only the transformation head. "
+            "'multitask' evaluates both heads."
+        ),
     )
 
     # CSV containing test image paths and labels.
@@ -338,7 +362,6 @@ def parse_args():
     )
 
     # Number of subprocesses used by the DataLoader.
-    # On Windows, if there are issues, set this to 0.
     parser.add_argument(
         "--num_workers",
         type=int,
@@ -371,6 +394,7 @@ def main():
     """
 
     args = parse_args()
+    print(f"Selected task: {args.task}")
 
     # Use GPU if available, otherwise CPU.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -398,6 +422,7 @@ def main():
 
     # Build the RGB multi-task baseline architecture.
     model = RGBMultiTaskModel(
+        task=args.task,
         num_transform_classes=3,
         pretrained=not args.no_pretrained,
     )
@@ -417,17 +442,26 @@ def main():
         model=model,
         dataloader=dataloader,
         device=device,
+        task=args.task,
     )
 
     # Compute all metrics from saved predictions.
-    metrics = compute_metrics(predictions_df)
+    metrics = compute_metrics(predictions_df, task=args.task,)
 
     # Save CSV, JSON, and confusion matrices.
     output_dir = Path(args.output_dir)
-    save_results(predictions_df, metrics, output_dir)
+    save_results(
+        predictions_df=predictions_df,
+        metrics=metrics,
+        output_dir=output_dir,
+        task=args.task,
+    )
 
     # Print summary in terminal.
-    print_metrics(metrics)
+    print_metrics(
+        metrics=metrics,
+        task=args.task,
+    )
 
     print("\nSaved results in:")
     print(output_dir)

@@ -9,12 +9,66 @@ from tqdm import tqdm
 from dataset import RRDatasetFromCSV, build_train_transform, build_eval_transform
 from model import RGBMultiTaskModel
 
+def compute_loss(outputs, batch, task, criterion, lambda_fake, lambda_transform, device):
+    """
+    Compute the training or validation loss depending on the selected task.
+    """
+
+    # Start from zero and add only the losses required by the selected task.
+    loss = 0.0
+
+    # Real/fake classification loss.
+    if task in ["fake", "multitask"]:
+        fake_labels = batch["fake_label"].to(device)
+        fake_loss = criterion(
+            outputs["fake_logits"],
+            fake_labels,
+        )
+
+        loss = loss + lambda_fake * fake_loss
+
+    # Transformation classification loss.
+    if task in ["transform", "multitask"]:
+        transform_labels = batch["transform_label"].to(device)
+        transform_loss = criterion(
+            outputs["transform_logits"],
+            transform_labels,
+        )
+
+        loss = loss + lambda_transform * transform_loss
+ 
+    return loss
+
+
+def compute_validation_score(val_metrics, task):
+    """
+    Compute the score.
+
+    For single-task experiments:
+        the score is the validation accuracy of that task.
+
+    For multi-task experiments:
+        the score is the average between real/fake accuracy and transformation accuracy.
+    """
+
+    if task == "fake":
+        return val_metrics["fake_acc"]
+
+    if task == "transform":
+        return val_metrics["transform_acc"]
+
+    if task == "multitask":
+        return 0.5 * val_metrics["fake_acc"] + 0.5 * val_metrics["transform_acc"]
+
+    raise ValueError(f"Unknown task: {task}")
+
 
 def train_one_epoch(
     model,
     loader,
     optimizer,
     device,
+    task,
     lambda_fake: float = 1.0,
     lambda_transform: float = 1.0,
 ):
@@ -26,6 +80,7 @@ def train_one_epoch(
         loader: PyTorch DataLoader that provides batches of training data.
         optimizer: Algorithm that updates the model weights.
         device: "cuda" if GPU is available, otherwise "cpu".
+        task: "fake", "transform" or "multitask".
         lambda_fake: Weight of the real/fake classification loss.
         lambda_transform: Weight of the transformation classification loss.
 
@@ -35,48 +90,33 @@ def train_one_epoch(
 
     model.train()
 
-    # CrossEntropyLoss is used for classification tasks.
-    #
-    # fake_criterion:
-    #   task 1: real vs AI-generated
-    #
-    # transform_criterion:
-    #   task 2: original vs transmitted vs re-digitized
-    fake_criterion = nn.CrossEntropyLoss()
-    transform_criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss()
 
     total_loss = 0.0
     correct_fake = 0
     correct_transform = 0
-    total = 0
+    total_samples = 0
 
     for batch in tqdm(loader, desc="Training"):
 
         # Move images and labels to the selected device.
         # If we have a GPU, this sends the tensors to the GPU.
         images = batch["image"].to(device)
-        fake_labels = batch["fake_label"].to(device)
-        transform_labels = batch["transform_label"].to(device)
 
         # Forward pass:
         # send images through the model and get predictions.
         outputs = model(images)
 
-        # Compute the loss for the real/fake task.
-        fake_loss = fake_criterion(
-            outputs["fake_logits"],
-            fake_labels,
+        # Compute the correct loss for the selected task.
+        loss = compute_loss(
+            outputs=outputs,
+            batch=batch,
+            task=task,
+            criterion=criterion,
+            lambda_fake=lambda_fake,
+            lambda_transform=lambda_transform,
+            device=device,
         )
-
-        # Compute the loss for the transformation task.
-        transform_loss = transform_criterion(
-            outputs["transform_logits"],
-            transform_labels,
-        )
-
-        # Multi-task loss:
-        # weighted sum of the two losses.
-        loss = lambda_fake * fake_loss + lambda_transform * transform_loss
 
         # Reset old gradients.
         optimizer.zero_grad()
@@ -91,26 +131,38 @@ def train_one_epoch(
         # Number of images in the current batch.
         batch_size = images.size(0)
 
-        # Accumulate total loss.
+        # Accumulate weighted loss.
+        # Multiplying by batch_size allows us to compute the average loss correctly.
         total_loss += loss.item() * batch_size
+        total_samples += batch_size
 
-        # Convert logits into predicted classes.
-        fake_pred = outputs["fake_logits"].argmax(dim=1)
-        transform_pred = outputs["transform_logits"].argmax(dim=1)
+        # Compute real/fake accuracy when this task is active.
+        if task in ["fake", "multitask"]:
+            fake_labels = batch["fake_label"].to(device)
+            fake_pred = outputs["fake_logits"].argmax(dim=1)
 
-        # Count correct predictions for both tasks.
-        correct_fake += (fake_pred == fake_labels).sum().item()
-        correct_transform += (transform_pred == transform_labels).sum().item()
+            correct_fake += (fake_pred == fake_labels).sum().item()
 
-        # Count total number of processed images.
-        total += batch_size
+        # Compute transformation accuracy when this task is active.
+        if task in ["transform", "multitask"]:
+            transform_labels = batch["transform_label"].to(device)
+            transform_pred = outputs["transform_logits"].argmax(dim=1)
 
-    # Return average loss and accuracy values.
-    return {
-        "loss": total_loss / total,
-        "fake_acc": correct_fake / total,
-        "transform_acc": correct_transform / total,
+            correct_transform += (transform_pred == transform_labels).sum().item()
+
+    # Build metrics dictionary.
+    metrics = {
+        "loss": total_loss / total_samples,
     }
+
+    if task in ["fake", "multitask"]:
+        metrics["fake_acc"] = correct_fake / total_samples
+
+    if task in ["transform", "multitask"]:
+        metrics["transform_acc"] = correct_transform / total_samples
+
+    return metrics
+
 
 
 @torch.no_grad()
@@ -118,6 +170,7 @@ def evaluate(
     model,
     loader,
     device,
+    task,
     lambda_fake: float = 1.0,
     lambda_transform: float = 1.0,
 ):
@@ -128,6 +181,7 @@ def evaluate(
         model: The trained model.
         loader: DataLoader for validation data.
         device: "cuda" or "cpu".
+        task: "fake", "transform" or "multitask".
         lambda_fake: Weight of the real/fake loss.
         lambda_transform: Weight of the transformation loss.
 
@@ -137,52 +191,205 @@ def evaluate(
 
     model.eval()
 
-    fake_criterion = nn.CrossEntropyLoss()
-    transform_criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss()
 
     total_loss = 0.0
+    total_samples = 0
+
     correct_fake = 0
     correct_transform = 0
-    total = 0
 
     for batch in tqdm(loader, desc="Validation"):
-
+        # Move input images to the selected device.
         images = batch["image"].to(device)
-        fake_labels = batch["fake_label"].to(device)
-        transform_labels = batch["transform_label"].to(device)
 
-        # Forward pass only.
-        # Because of @torch.no_grad(), PyTorch does not store gradients here.
+        # Forward pass without gradient computation.
         outputs = model(images)
 
-        fake_loss = fake_criterion(
-            outputs["fake_logits"],
-            fake_labels,
+        # Compute validation loss for the selected task.
+        loss = compute_loss(
+            outputs=outputs,
+            batch=batch,
+            task=task,
+            criterion=criterion,
+            lambda_fake=lambda_fake,
+            lambda_transform=lambda_transform,
+            device=device,
         )
-
-        transform_loss = transform_criterion(
-            outputs["transform_logits"],
-            transform_labels,
-        )
-
-        loss = lambda_fake * fake_loss + lambda_transform * transform_loss
-
+        
         batch_size = images.size(0)
 
         total_loss += loss.item() * batch_size
+        total_samples += batch_size
 
-        fake_pred = outputs["fake_logits"].argmax(dim=1)
-        transform_pred = outputs["transform_logits"].argmax(dim=1)
+        # Real/fake validation accuracy.
+        if task in ["fake", "multitask"]:
+            fake_labels = batch["fake_label"].to(device)
+            fake_pred = outputs["fake_logits"].argmax(dim=1)
 
-        correct_fake += (fake_pred == fake_labels).sum().item()
-        correct_transform += (transform_pred == transform_labels).sum().item()
-        total += batch_size
+            correct_fake += (fake_pred == fake_labels).sum().item()
 
-    return {
-        "loss": total_loss / total,
-        "fake_acc": correct_fake / total,
-        "transform_acc": correct_transform / total,
+        # Transformation validation accuracy.
+        if task in ["transform", "multitask"]:
+            transform_labels = batch["transform_label"].to(device)
+            transform_pred = outputs["transform_logits"].argmax(dim=1)
+
+            correct_transform += (transform_pred == transform_labels).sum().item()
+
+    # Build metrics dictionary.
+    metrics = {
+        "loss": total_loss / total_samples,
     }
+
+    if task in ["fake", "multitask"]:
+        metrics["fake_acc"] = correct_fake / total_samples
+
+    if task in ["transform", "multitask"]:
+        metrics["transform_acc"] = correct_transform / total_samples
+
+    return metrics
+
+
+def parse_args():
+    """
+    Read command-line arguments.
+
+    This script supports three experiments with the same code:
+        1. fake-only baseline
+        2. transformation-only baseline
+        3. joint multi-task baseline
+    """
+
+    parser = argparse.ArgumentParser(
+        description="Train RGB baselines for Project 2."
+    )
+
+    # Task selection.
+    parser.add_argument(
+        "--task",
+        type=str,
+        default="multitask",
+        choices=["fake", "transform", "multitask"],
+        help=(
+            "Training task. "
+            "'fake' trains only the real/fake head. "
+            "'transform' trains only the transformation head. "
+            "'multitask' trains both heads jointly."
+        ),
+    )
+
+    # Dataset paths.
+    parser.add_argument(
+        "--train_csv",
+        type=str,
+        required=True,
+        help="Path to the training CSV file.",
+    )
+
+    parser.add_argument(
+        "--val_csv",
+        type=str,
+        required=True,
+        help="Path to the validation CSV file.",
+    )
+
+    parser.add_argument(
+        "--image_root",
+        type=str,
+        required=True,
+        help="Root folder containing the images.",
+    )
+
+    # Training hyperparameters.
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=5,
+        help="Number of training epochs.",
+    )
+
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=32,
+        help="Number of images per batch.",
+    )
+
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=1e-4,
+        help="Learning rate.",
+    )
+
+    parser.add_argument(
+        "--image_size",
+        type=int,
+        default=224,
+        help="Input image size.",
+    )
+
+    parser.add_argument(
+        "--weight_decay",
+        type=float,
+        default=1e-4,
+        help="Weight decay used by AdamW.",
+    )
+
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=2,
+        help="Number of DataLoader workers.",
+    )
+
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=4,
+        help="Early stopping patience.",
+    )
+
+    # Loss weights.
+    # These are both used only when task == "multitask".
+    # In single-task training, only the relevant one affects the loss.
+    parser.add_argument(
+        "--lambda_fake",
+        type=float,
+        default=1.0,
+        help="Loss weight for the real/fake task.",
+    )
+
+    parser.add_argument(
+        "--lambda_transform",
+        type=float,
+        default=1.0,
+        help="Loss weight for the transformation task.",
+    )
+
+    # Checkpoint settings.
+    parser.add_argument(
+        "--checkpoint_dir",
+        type=str,
+        default="checkpoints",
+        help="Folder where checkpoints are saved.",
+    )
+
+    parser.add_argument(
+        "--checkpoint_name",
+        type=str,
+        default="best_rgb_baseline.pt",
+        help="Checkpoint filename.",
+    )
+
+    # Pretraining option.
+    parser.add_argument(
+        "--no_pretrained",
+        action="store_true",
+        help="Train the backbone from scratch instead of using ImageNet weights.",
+    )
+    
+    return parser.parse_args()
 
 
 def main():
@@ -190,44 +397,17 @@ def main():
     Main training function.
 
     This function:
-        1. Reads command-line arguments.
-        2. Creates datasets and dataloaders.
-        3. Creates the model.
-        4. Creates the optimizer.
-        5. Runs training and validation.
-        6. Saves the best checkpoint.
+        1. Read command-line arguments.
+        2. Select GPU or CPU.
+        3. Create datasets.
+        4. Create DataLoaders.
+        5. Build the model.
+        6. Train and validate.
+        7. Save the best checkpoint.
     """
 
-    # argparse allows us to pass parameters from the terminal.
-    #
-    # Example:
-    # python src/train.py --train_csv data/splits/train.csv --val_csv data/splits/val.csv ...
-    parser = argparse.ArgumentParser()
-
-    # Paths to CSV files and image folder.
-    parser.add_argument("--train_csv", type=str, required=True)
-    parser.add_argument("--val_csv", type=str, required=True)
-    parser.add_argument("--image_root", type=str, required=True)
-
-    # Training hyperparameters.
-    parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--image_size", type=int, default=224)
-    parser.add_argument("--weight_decay", type=float, default=1e-4)
-    parser.add_argument("--num_workers", type=int, default=2)
-    parser.add_argument("--patience", type=int, default=4)
-    parser.add_argument("--checkpoint_name", type=str, default="best_rgb_baseline.pt")
-
-    # Multi-task loss weights.
-    parser.add_argument("--lambda_fake", type=float, default=1.0)
-    parser.add_argument("--lambda_transform", type=float, default=1.0)
-
-    # Folder where checkpoints will be saved.
-    parser.add_argument("--checkpoint_dir", type=str, default="checkpoints")
-
-    # Read all arguments from the command line.
-    args = parser.parse_args()
+    args = parse_args()
+    print(f"Selected task: {args.task}")
 
     # Select GPU if available, otherwise CPU.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -280,6 +460,7 @@ def main():
 
     # Create the RGB multi-task baseline model.
     model = RGBMultiTaskModel(
+        task=args.task,
         num_transform_classes=3,
         pretrained=True,
     )
@@ -301,7 +482,7 @@ def main():
         factor=0.5,
         patience=2,
     )
-    # We save the checkpoint.
+
     best_val_score = 0.0
     epochs_without_improvement = 0
 
@@ -315,6 +496,7 @@ def main():
             loader=train_loader,
             optimizer=optimizer,
             device=device,
+            task=args.task,
             lambda_fake=args.lambda_fake,
             lambda_transform=args.lambda_transform,
         )
@@ -324,6 +506,7 @@ def main():
             model=model,
             loader=val_loader,
             device=device,
+            task=args.task,
             lambda_fake=args.lambda_fake,
             lambda_transform=args.lambda_transform,
         )
@@ -332,12 +515,16 @@ def main():
         print(f"Train: {train_metrics}")
         print(f"Val:   {val_metrics}")
 
-        # Use a combined score because this is a multi-task model.
-        val_score = 0.5 * val_metrics["fake_acc"] + 0.5 * val_metrics["transform_acc"]
+        # Select the correct validation score depending on the task.
+        val_score = compute_validation_score(
+            val_metrics=val_metrics,
+            task=args.task,
+        )
 
         # Update the scheduler using validation loss.
         scheduler.step(val_metrics["loss"])
         current_lr = optimizer.param_groups[0]["lr"]
+        
         print(f"Val score: {val_score:.4f}")
         print(f"Learning rate: {current_lr:.6f}")
 
@@ -354,6 +541,7 @@ def main():
                     "epoch": epoch,
                     "val_metrics": val_metrics,
                     "val_score": val_score,
+                    "task": args.task,
                     "args": vars(args),
                 },
                 checkpoint_path,
@@ -363,6 +551,7 @@ def main():
         else:
              # Count epochs without improvement for early stopping.
             epochs_without_improvement += 1
+            
             print(
                 f"No improvement for {epochs_without_improvement}/"
                 f"{args.patience} epochs"

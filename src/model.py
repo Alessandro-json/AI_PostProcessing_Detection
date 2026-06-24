@@ -4,24 +4,22 @@ import torchvision.models as models
 
 class RGBMultiTaskModel(nn.Module):
     """
-    RGB multi-task baseline model.
-
-    The model receives one RGB image and produces two predictions:
-
-        1. fake_logits:
-            real vs AI-generated image
-
-        2. transform_logits:
-            original vs internet-transmitted vs re-digitized image
-
-    The architecture is composed by a shared backbone with two classification heads trained jointly.
+    RGB baseline model for:
+    - single-task real/fake classification
+    - single-task transformation classification
+    - joint multi-task classification   
     """
 
-    def __init__(self, num_transform_classes: int = 3, pretrained: bool = True):
+    def __init__(self, task: str = "multitask", num_transform_classes: int = 3, pretrained: bool = True):
         """
         Initialize the model.
 
         Args:
+            task:
+                "fake": single-task real/fake classification
+                "transform": single-task transformation classification
+                "multitask": joint multi-task classification 
+            
             num_transform_classes:
                 Number of transformation classes is 3:
                     0 = original
@@ -33,6 +31,13 @@ class RGBMultiTaskModel(nn.Module):
         """
 
         super().__init__()
+
+        if task not in ["fake", "transform", "multitask"]:
+            raise ValueError(
+                "task must be one of: 'fake', 'transform', 'multitask'"
+            )
+
+        self.task = task
 
         # Select the ResNet18 weights.
         # If pretrained=True, we load ImageNet pretrained weights.
@@ -73,6 +78,8 @@ class RGBMultiTaskModel(nn.Module):
                     Raw scores for real/fake classification.
                     Shape: [batch_size, 2]
 
+                and/or
+
                 transform_logits:
                     Raw scores for transformation classification.
                     Shape: [batch_size, 3]
@@ -81,16 +88,15 @@ class RGBMultiTaskModel(nn.Module):
         # Extract shared visual features from the RGB images.
         features = self.backbone(images)
 
-        # Use the shared features for the first task:
-        # real vs fake classification.
-        fake_logits = self.fake_head(features)
+        # Output dictionary.
+        outputs = {}
 
-        # Use the same shared features for the second task:
-        # transformation classification.
-        transform_logits = self.transform_head(features)
+        # Add real/fake logits only if needed.
+        if self.task in ["fake", "multitask"]:
+            outputs["fake_logits"] = self.fake_head(features)
 
-        # Return both predictions.
-        return {
-            "fake_logits": fake_logits,
-            "transform_logits": transform_logits,
-        }
+        # Add transformation logits only if needed.
+        if self.task in ["transform", "multitask"]:
+            outputs["transform_logits"] = self.transform_head(features)
+
+        return outputs
