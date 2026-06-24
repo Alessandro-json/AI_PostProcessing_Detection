@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from dataset import RRDatasetFromCSV, build_train_transform, build_eval_transform
-from model import RGBMultiTaskModel
+from model_RGB import RGBMultiTaskModel
 
 def compute_loss(outputs, batch, task, criterion, lambda_fake, lambda_transform, device):
     """
@@ -388,7 +388,7 @@ def parse_args():
         action="store_true",
         help="Train the backbone from scratch instead of using ImageNet weights.",
     )
-    
+
     return parser.parse_args()
 
 

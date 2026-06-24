@@ -14,7 +14,7 @@ from sklearn.metrics import (
 from torch.utils.data import DataLoader
 
 from dataset import RRDatasetFromCSV, build_eval_transform
-from model import RGBMultiTaskModel
+from model_RGB import RGBMultiTaskModel
 
 
 FAKE_LABEL_NAMES = ["real", "ai"]
