@@ -21,13 +21,21 @@ def load_midas_model(model_type: str, device):
     """
 
     # Load pretrained MiDaS model.
-    midas = torch.hub.load("intel-isl/MiDaS", model_type)
+    midas = torch.hub.load(
+    "intel-isl/MiDaS",
+    model_type,
+    trust_repo=True,
+	)
 
     midas.to(device)
     midas.eval()
 
     # Load the official MiDaS transforms.
-    midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
+    midas_transforms = torch.hub.load(
+    "intel-isl/MiDaS",
+    "transforms",
+    trust_repo=True,
+	)
 
     # DPT models need dpt_transform.
     # MiDaS_small uses small_transform.
