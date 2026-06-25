@@ -10,6 +10,7 @@ from tqdm import tqdm
 
 from dataset_depth import RRGeometricDatasetFromCSV
 from model_depth import GeometricMultiTaskModel
+from uncertainty_loss import UncertaintyWeightedLoss
 
 
 def train_one_epoch(
@@ -17,66 +18,48 @@ def train_one_epoch(
     loader,
     optimizer,
     device,
-    lambda_fake: float = 1.0,
-    lambda_transform: float = 1.0,
+    lambda_fake=1.0,
+    lambda_transform=1.0,
+    uncertainty_loss=None,
 ):
-    """
-    Train the geometric multi-task model for one epoch.
-
-    Args:
-        model: The model we want to train.
-        loader: DataLoader that provides RGB images, depth maps, edge maps, and labels.
-        optimizer: Optimizer used to update model weights.
-        device: "cuda" if GPU is available, otherwise "cpu".
-        lambda_fake: Weight of the real/fake classification loss.
-        lambda_transform: Weight of the transformation classification loss.
-
-    Returns:
-        Dictionary with training loss and accuracies.
-    """
-
+	
     model.train()
 
-    # Classification losses for the two Project 2 tasks.
-    fake_criterion = nn.CrossEntropyLoss()
-    transform_criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss()
 
     total_loss = 0.0
     correct_fake = 0
     correct_transform = 0
     total = 0
 
-    for batch in tqdm(loader, desc="Training geometric"):
+    weight_fake_sum = 0.0
+    weight_transform_sum = 0.0
 
-        # Move batch tensors to GPU/CPU.
+    for batch in tqdm(loader, desc="Training geometric"):
         images = batch["image"].to(device)
         depth = batch["depth"].to(device)
-        edge_consistency = batch["edge_consistency"].to(device)
-
         fake_labels = batch["fake_label"].to(device)
         transform_labels = batch["transform_label"].to(device)
 
-        # Forward pass through RGB + depth + edge model.
+        edge_consistency = batch.get("edge_consistency")
+        if edge_consistency is not None:
+            edge_consistency = edge_consistency.to(device)
+
         outputs = model(
             images=images,
             depth=depth,
             edge_consistency=edge_consistency,
         )
 
-        # Loss for real/fake classification.
-        fake_loss = fake_criterion(
-            outputs["fake_logits"],
-            fake_labels,
-        )
+        fake_loss = criterion(outputs["fake_logits"], fake_labels)
+        transform_loss = criterion(outputs["transform_logits"], transform_labels)
 
-        # Loss for transformation classification.
-        transform_loss = transform_criterion(
-            outputs["transform_logits"],
-            transform_labels,
-        )
-
-        # Multi-task loss, same logic as the RGB baseline.
-        loss = lambda_fake * fake_loss + lambda_transform * transform_loss
+        if uncertainty_loss is not None:
+            loss, loss_info = uncertainty_loss(fake_loss, transform_loss)
+            weight_fake_sum += loss_info["weight_fake"]
+            weight_transform_sum += loss_info["weight_transform"]
+        else:
+            loss = lambda_fake * fake_loss + lambda_transform * transform_loss
 
         optimizer.zero_grad()
         loss.backward()
@@ -85,21 +68,24 @@ def train_one_epoch(
         batch_size = images.size(0)
         total_loss += loss.item() * batch_size
 
-        # Convert logits into predicted labels.
-        fake_pred = outputs["fake_logits"].argmax(dim=1)
-        transform_pred = outputs["transform_logits"].argmax(dim=1)
+        fake_preds = outputs["fake_logits"].argmax(dim=1)
+        transform_preds = outputs["transform_logits"].argmax(dim=1)
 
-        correct_fake += (fake_pred == fake_labels).sum().item()
-        correct_transform += (transform_pred == transform_labels).sum().item()
-
+        correct_fake += (fake_preds == fake_labels).sum().item()
+        correct_transform += (transform_preds == transform_labels).sum().item()
         total += batch_size
 
-    return {
+    metrics = {
         "loss": total_loss / total,
         "fake_acc": correct_fake / total,
         "transform_acc": correct_transform / total,
     }
 
+    if uncertainty_loss is not None:
+        metrics["weight_fake"] = weight_fake_sum / len(loader)
+        metrics["weight_transform"] = weight_transform_sum / len(loader)
+
+    return metrics
 
 @torch.no_grad()
 def evaluate(
@@ -108,6 +94,7 @@ def evaluate(
     device,
     lambda_fake: float = 1.0,
     lambda_transform: float = 1.0,
+	uncertainty_loss=None
 ):
     """
     Evaluate the geometric multi-task model on validation data.
@@ -158,8 +145,13 @@ def evaluate(
             outputs["transform_logits"],
             transform_labels,
         )
-
-        loss = lambda_fake * fake_loss + lambda_transform * transform_loss
+		# Use the same loss combination strategy during validation.
+		# This affects only the validation loss, not the accuracy computation.
+        if uncertainty_loss is not None:
+            loss, loss_info = uncertainty_loss(fake_loss, transform_loss)
+        else:
+            loss = lambda_fake * fake_loss + lambda_transform * transform_loss
+        #loss = lambda_fake * fake_loss + lambda_transform * transform_loss
 
         batch_size = images.size(0)
         total_loss += loss.item() * batch_size
@@ -232,6 +224,12 @@ def main():
         action="store_true",
         help="Disable attention/gating after feature fusion.",
     )
+	#use uncertainty weighting
+    parser.add_argument(
+    "--use_uncertainty_weighting",
+    action="store_true",
+    help="Use learnable uncertainty weighting between fake and transform losses.",
+	)
 
     args = parser.parse_args()
 
@@ -287,14 +285,29 @@ def main():
         use_attention=not args.no_attention,
     )
 
+	# Create the uncertainty loss only if requested.
+	# Otherwise, the training keeps using fixed lambda weights.
+    if args.use_uncertainty_weighting:
+    	uncertainty_loss = UncertaintyWeightedLoss().to(device)
+    else:
+    	uncertainty_loss = None
+
     model = model.to(device)
 
-    # AdamW optimizer, same style as the current training script.
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=args.lr,
-        weight_decay=args.weight_decay,
-    )
+    # If uncertainty weighting is enabled, the optimizer must also update
+	# the learnable log-variance parameters of the loss function.
+    if uncertainty_loss is not None:
+        optimizer = torch.optim.AdamW(
+			list(model.parameters()) + list(uncertainty_loss.parameters()),
+			lr=args.lr,
+			weight_decay=args.weight_decay,
+		)
+    else:
+        optimizer = torch.optim.AdamW(
+			model.parameters(),
+			lr=args.lr,
+			weight_decay=args.weight_decay,
+		)
 
     # Reduce LR when validation loss stops improving.
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -317,6 +330,7 @@ def main():
             device=device,
             lambda_fake=args.lambda_fake,
             lambda_transform=args.lambda_transform,
+			uncertainty_loss=uncertainty_loss,
         )
 
         val_metrics = evaluate(
@@ -325,6 +339,7 @@ def main():
             device=device,
             lambda_fake=args.lambda_fake,
             lambda_transform=args.lambda_transform,
+			uncertainty_loss=uncertainty_loss,
         )
 
         print(f"Train: {train_metrics}")
