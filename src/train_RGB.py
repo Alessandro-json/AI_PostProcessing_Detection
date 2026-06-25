@@ -8,14 +8,16 @@ from tqdm import tqdm
 
 from dataset import RRDatasetFromCSV, build_train_transform, build_eval_transform
 from model_RGB import RGBMultiTaskModel
+from loss import UncertaintyWeightedLoss
 
-def compute_loss(outputs, batch, task, criterion, lambda_fake, lambda_transform, device):
+
+def compute_loss(outputs, batch, task, criterion, lambda_fake, lambda_transform, device, adaptive_loss=None):
     """
     Compute the training or validation loss depending on the selected task.
     """
 
-    # Start from zero and add only the losses required by the selected task.
-    loss = 0.0
+    # Start from empty and add only the losses required by the selected task.
+    loss_info = {}
 
     # Real/fake classification loss.
     if task in ["fake", "multitask"]:
@@ -25,7 +27,7 @@ def compute_loss(outputs, batch, task, criterion, lambda_fake, lambda_transform,
             fake_labels,
         )
 
-        loss = loss + lambda_fake * fake_loss
+        loss_info["fake_loss"] = fake_loss.item()
 
     # Transformation classification loss.
     if task in ["transform", "multitask"]:
@@ -35,9 +37,37 @@ def compute_loss(outputs, batch, task, criterion, lambda_fake, lambda_transform,
             transform_labels,
         )
 
-        loss = loss + lambda_transform * transform_loss
+        loss_info["transform_loss"] = transform_loss.item()
  
-    return loss
+    # Single-task real/fake baseline.
+    if task == "fake":
+        loss = fake_loss
+
+    # Single-task transformation baseline.
+    elif task == "transform":
+        loss = transform_loss
+
+    # Multi-task baseline.
+    elif task == "multitask":
+        # Manual fixed loss weighting.
+        if adaptive_loss is None:
+            loss = lambda_fake * fake_loss + lambda_transform * transform_loss
+
+            loss_info["weight_fake"] = lambda_fake
+            loss_info["weight_transform"] = lambda_transform
+        
+        # Learned uncertainty weighting.
+        else:
+            loss, learned_info = adaptive_loss(
+                fake_loss=fake_loss,
+                transform_loss=transform_loss,
+            )
+        
+            loss_info.update(learned_info)
+    else:
+        raise ValueError(f"Unknown task: {task}")
+
+    return loss, loss_info
 
 
 def compute_validation_score(val_metrics, task):
@@ -71,6 +101,7 @@ def train_one_epoch(
     task,
     lambda_fake: float = 1.0,
     lambda_transform: float = 1.0,
+    adaptive_loss=None,
 ):
     """
     Train the model for one epoch.
@@ -97,6 +128,12 @@ def train_one_epoch(
     correct_transform = 0
     total_samples = 0
 
+    # These variables are used only when learned uncertainty weighting is active.
+    # They store the average learned weights over the epoch.
+    weight_fake_sum = 0.0
+    weight_transform_sum = 0.0
+    weight_count = 0
+
     for batch in tqdm(loader, desc="Training"):
 
         # Move images and labels to the selected device.
@@ -108,7 +145,7 @@ def train_one_epoch(
         outputs = model(images)
 
         # Compute the correct loss for the selected task.
-        loss = compute_loss(
+        loss, loss_info = compute_loss(
             outputs=outputs,
             batch=batch,
             task=task,
@@ -116,7 +153,15 @@ def train_one_epoch(
             lambda_fake=lambda_fake,
             lambda_transform=lambda_transform,
             device=device,
+            adaptive_loss=adaptive_loss,
         )
+
+        # Store learned weights for epoch-level logging.
+        # This is useful only when uncertainty weighting is active.
+        if adaptive_loss is not None:
+            weight_fake_sum += loss_info["weight_fake"]
+            weight_transform_sum += loss_info["weight_transform"]
+            weight_count += 1
 
         # Reset old gradients.
         optimizer.zero_grad()
@@ -161,6 +206,11 @@ def train_one_epoch(
     if task in ["transform", "multitask"]:
         metrics["transform_acc"] = correct_transform / total_samples
 
+    # Add average learned weights to the metrics dictionary.
+    if adaptive_loss is not None and weight_count > 0:
+        metrics["weight_fake"] = weight_fake_sum / weight_count
+        metrics["weight_transform"] = weight_transform_sum / weight_count
+    
     return metrics
 
 
@@ -173,6 +223,7 @@ def evaluate(
     task,
     lambda_fake: float = 1.0,
     lambda_transform: float = 1.0,
+    adaptive_loss=None,
 ):
     """
     Evaluate the model on validation data.
@@ -184,6 +235,7 @@ def evaluate(
         task: "fake", "transform" or "multitask".
         lambda_fake: Weight of the real/fake loss.
         lambda_transform: Weight of the transformation loss.
+        adaptive_loss: "None" if the weight are added manually.
 
     Returns:
         A dictionary with validation loss and accuracies.
@@ -199,6 +251,11 @@ def evaluate(
     correct_fake = 0
     correct_transform = 0
 
+    # These variables are used only when learned uncertainty weighting is active.
+    weight_fake_sum = 0.0
+    weight_transform_sum = 0.0
+    weight_count = 0
+
     for batch in tqdm(loader, desc="Validation"):
         # Move input images to the selected device.
         images = batch["image"].to(device)
@@ -207,7 +264,7 @@ def evaluate(
         outputs = model(images)
 
         # Compute validation loss for the selected task.
-        loss = compute_loss(
+        loss, loss_info = compute_loss(
             outputs=outputs,
             batch=batch,
             task=task,
@@ -215,8 +272,15 @@ def evaluate(
             lambda_fake=lambda_fake,
             lambda_transform=lambda_transform,
             device=device,
+            adaptive_loss=adaptive_loss,
         )
         
+        # Store learned weights for validation logging.
+        if adaptive_loss is not None:
+            weight_fake_sum += loss_info["weight_fake"]
+            weight_transform_sum += loss_info["weight_transform"]
+            weight_count += 1
+
         batch_size = images.size(0)
 
         total_loss += loss.item() * batch_size
@@ -246,6 +310,11 @@ def evaluate(
 
     if task in ["transform", "multitask"]:
         metrics["transform_acc"] = correct_transform / total_samples
+
+    # Add average learned weights to the metrics dictionary.
+    if adaptive_loss is not None and weight_count > 0:
+        metrics["weight_fake"] = weight_fake_sum / weight_count
+        metrics["weight_transform"] = weight_transform_sum / weight_count
 
     return metrics
 
@@ -367,6 +436,18 @@ def parse_args():
         help="Loss weight for the transformation task.",
     )
 
+    parser.add_argument(
+        "--loss_weighting",
+        type=str,
+        default="manual",
+        choices=["manual", "learned"],
+        help=(
+            "Loss weighting strategy for multi-task training. "
+            "'manual' uses lambda_fake and lambda_transform. "
+            "'learned' uses uncertainty-based learnable weighting."
+        ),
+    )
+
     # Checkpoint settings.
     parser.add_argument(
         "--checkpoint_dir",
@@ -468,9 +549,25 @@ def main():
     # Move model to GPU or CPU.
     model = model.to(device)
 
+    # Optional adaptive loss weighting.
+    adaptive_loss = None
+
+    if args.loss_weighting == "learned":
+        if args.task != "multitask":
+            raise ValueError(
+                "Learned loss weighting can only be used with task='multitask'."
+            )
+
+        adaptive_loss = UncertaintyWeightedLoss().to(device)
+
     # AdamW optimizer updates the model weights.
+    parameters = list(model.parameters())
+
+    if adaptive_loss is not None:
+        parameters += list(adaptive_loss.parameters())
+
     optimizer = torch.optim.AdamW(
-        model.parameters(),
+        parameters,
         lr=args.lr,
         weight_decay=args.weight_decay,
     )
@@ -499,6 +596,7 @@ def main():
             task=args.task,
             lambda_fake=args.lambda_fake,
             lambda_transform=args.lambda_transform,
+            adaptive_loss=adaptive_loss,
         )
 
         # Validate after the epoch.
@@ -509,11 +607,26 @@ def main():
             task=args.task,
             lambda_fake=args.lambda_fake,
             lambda_transform=args.lambda_transform,
+            adaptive_loss=adaptive_loss,
         )
 
         # Print results.
         print(f"Train: {train_metrics}")
         print(f"Val:   {val_metrics}")
+
+        # Print learned loss weights when uncertainty weighting is active.
+        if adaptive_loss is not None:
+            print(
+                "Learned loss weights "
+                f"(train): fake={train_metrics['weight_fake']:.4f}, "
+                f"transform={train_metrics['weight_transform']:.4f}"
+            )
+
+            print(
+                "Learned loss weights "
+                f"(val):   fake={val_metrics['weight_fake']:.4f}, "
+                f"transform={val_metrics['weight_transform']:.4f}"
+            )
 
         # Select the correct validation score depending on the task.
         val_score = compute_validation_score(
@@ -538,6 +651,9 @@ def main():
             torch.save(
                 {
                     "model_state_dict": model.state_dict(),
+                    "adaptive_loss_state_dict": (
+                        adaptive_loss.state_dict() if adaptive_loss is not None else None
+                    ),
                     "epoch": epoch,
                     "val_metrics": val_metrics,
                     "val_score": val_score,
