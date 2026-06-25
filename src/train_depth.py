@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from dataset_depth import RRGeometricDatasetFromCSV
 from model_depth import GeometricMultiTaskModel
-from uncertainty_loss import UncertaintyWeightedLoss
+from loss import UncertaintyWeightedLoss
 
 
 def train_one_epoch(
