@@ -338,6 +338,41 @@ def parse_args():
         help="Use this flag if the checkpoint was trained without ImageNet pretrained weights.",
     )
 
+    parser.add_argument(
+	"--fake_filter",
+	type=int,
+	default=None,
+	choices=[0, 1],
+	help=(
+		"Optional filter for the real/fake ground-truth label. "
+		"Use 0 for real images and 1 for AI-generated images."
+	),
+	)
+
+    parser.add_argument(
+		"--transform_filter",
+		type=int,
+		default=None,
+		choices=[0, 1, 2],
+		help=(
+			"Optional filter for the transformation ground-truth label. "
+			"Use 0 for original, 1 for transfer, and 2 for redigital."
+		),
+	)
+
+    parser.add_argument(
+		"--shuffle",
+		action="store_true",
+		help="Shuffle the filtered dataset before generating Grad-CAM images.",
+	)
+
+    parser.add_argument(
+		"--seed",
+		type=int,
+		default=42,
+		help="Random seed used when --shuffle is enabled.",
+	)
+
     return parser.parse_args()
 
 
@@ -368,12 +403,38 @@ def main():
         train=False,
     )
 
+	# Optionally filter the dataset by real/fake label.
+	# This is useful because the CSV may be ordered, so the first images can all belong
+	# to the same class.
+    if args.fake_filter is not None:
+        dataset.data = dataset.data[
+			dataset.data["fake_label"] == args.fake_filter
+		].reset_index(drop=True)
+
+	# Optionally filter the dataset by transformation label.
+	# 0 = original, 1 = transfer, 2 = redigital.
+    if args.transform_filter is not None:
+        dataset.data = dataset.data[
+			dataset.data["transform_label"] == args.transform_filter
+		].reset_index(drop=True)
+
+    if len(dataset) == 0:
+	    raise ValueError(
+			"No samples found after applying the selected filters. "
+			"Check --fake_filter and --transform_filter."
+		)
+
+	# Use a fixed generator when shuffling to make the selected images reproducible.
+    generator = torch.Generator()
+    generator.manual_seed(args.seed)
+
     dataloader = DataLoader(
-        dataset,
-        batch_size=1,
-        shuffle=False,
-        num_workers=args.num_workers,
-    )
+		dataset,
+		batch_size=1,
+		shuffle=args.shuffle,
+		num_workers=args.num_workers,
+		generator=generator if args.shuffle else None,
+	)
 
     model = GeometricMultiTaskModel(
         num_transform_classes=3,
