@@ -16,35 +16,72 @@ def load_midas_model(model_type: str, device):
     """
     Load a pretrained MiDaS model from PyTorch Hub.
 
-    This model is used ONLY to estimate depth maps before training.
-    We do not train MiDaS. We use it as a frozen pretrained depth estimator.
+    This model is used only to estimate depth maps before training.
+    We do not train MiDaS.
     """
 
-    # Load pretrained MiDaS model.
+    # Trust only the official repositories needed by MiDaS.
+    trust_torch_hub_repositories()
+
+    # Load pretrained MiDaS model without interactive prompts.
     midas = torch.hub.load(
-    "intel-isl/MiDaS",
-    model_type,
-    trust_repo=True,
-	)
+        "intel-isl/MiDaS",
+        model_type,
+        trust_repo=True,
+    )
 
     midas.to(device)
     midas.eval()
 
-    # Load the official MiDaS transforms.
+    # Load the official MiDaS transforms without interactive prompts.
     midas_transforms = torch.hub.load(
-    "intel-isl/MiDaS",
-    "transforms",
-    trust_repo=True,
-	)
+        "intel-isl/MiDaS",
+        "transforms",
+        trust_repo=True,
+    )
 
-    # DPT models need dpt_transform.
-    # MiDaS_small uses small_transform.
     if model_type in ["DPT_Large", "DPT_Hybrid"]:
         transform = midas_transforms.dpt_transform
     else:
         transform = midas_transforms.small_transform
 
     return midas, transform
+
+def trust_torch_hub_repositories():
+    """
+    Add the official Torch Hub repositories used by MiDaS to the trusted list.
+
+    This avoids interactive trust prompts in Colab for:
+    1. intel-isl/MiDaS
+    2. rwightman/gen-efficientnet-pytorch
+
+    Only these known repositories are trusted.
+    """
+
+    hub_dir = Path(torch.hub.get_dir())
+    hub_dir.mkdir(parents=True, exist_ok=True)
+
+    trusted_list_path = hub_dir / "trusted_list"
+
+    repositories_to_trust = [
+        "intel-isl_MiDaS",
+        "rwightman_gen-efficientnet-pytorch",
+    ]
+
+    existing_repositories = set()
+
+    if trusted_list_path.exists():
+        with open(trusted_list_path, "r", encoding="utf-8") as file:
+            existing_repositories = {
+                line.strip()
+                for line in file
+                if line.strip()
+            }
+
+    with open(trusted_list_path, "a", encoding="utf-8") as file:
+        for repository in repositories_to_trust:
+            if repository not in existing_repositories:
+                file.write(repository + "\n")
 
 
 def compute_depth_for_image(image_path: Path, midas, transform, device):
