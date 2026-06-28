@@ -10,7 +10,7 @@ from dataset_depth_frequency import RRDepthFrequencyDatasetFromCSV
 from model_depth_frequency import RGBDepthFrequencyMultiTaskModel
 
 try:
-    from uncertainty_loss import UncertaintyWeightedLoss
+    from loss import UncertaintyWeightedLoss
 except ImportError:
     UncertaintyWeightedLoss = None
 
