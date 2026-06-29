@@ -281,7 +281,6 @@ def main():
     )
 
     model = RGBDepthFrequencyMultiTaskModel(
-        num_fake_classes=2,
         num_transform_classes=3,
         pretrained=not args.no_pretrained,
         use_attention=not args.no_attention,
