@@ -45,7 +45,6 @@ def parse_args():
 
 def load_model(checkpoint_path, device, use_attention=True, pretrained=True):
     model = RGBDepthFrequencyMultiTaskModel(
-        num_fake_classes=2,
         num_transform_classes=3,
         pretrained=pretrained,
         use_attention=use_attention,
