@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from dataset_depth_frequency import RRDepthFrequencyDatasetFromCSV
-from model_depth_frequency import RGBDepthFrequencyMultiTaskModel
+from model_depth_frequency_gated import RGBDepthFrequencyMultiTaskModel
 
 try:
     from loss import UncertaintyWeightedLoss
