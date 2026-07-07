@@ -326,18 +326,27 @@ python src/evaluate_vit_RGB.py \
 | RGB + Depth + Frequency | 92.44% | 81.67% |
 | ViT RGB | 93.56% | 86.22% |
 | ViT RGB + Depth + Frequency | 92.44% | 83.33% |
-| RGB + Depth + Frequency Gated | 91.56% | 76.00% |
+| RGB + Depth + Frequency Gated | 92.22% | 72.89% |
 Re-digitization is consistently the hardest condition for real/fake detection across all models. The two tasks show mild competition: configurations that improve transformation accuracy tend to slightly decrease fake accuracy.
 
 ---
 
 ## Ablation study
 
-The ablation study on loss weights (λ_fake / λ_transform) shows that the 1/2 configuration is the best RGB setting, improving transformation classification while preserving fake detection performance. Learned uncertainty weighting did not consistently improve results over the best manual configuration.
+The ablation study was used to isolate the effect of the main design choices: loss balancing, additional modalities, fusion strategy, and backbone architecture.
 
-The depth branch produces a strong and stable multimodal baseline. The explicit edge-consistency branch (RGB/depth disagreement) improved transformation accuracy but decreased fake accuracy, and was not selected as the primary model.
+First, we compared different loss weight configurations for the RGB multi-task baseline. The λ_fake / λ_transform = 1/2 setting provided the best RGB trade-off, improving transformation classification while preserving fake detection performance. Learned uncertainty weighting did not consistently outperform the best manual configuration.
 
-The ViT-based experiments were introduced as an architectural comparison with the ResNet-based models. Overall, ViT achieved stronger results, especially on transformation classification, suggesting that global patch-level attention is more effective for capturing long-range visual and forensic patterns in this joint detection setting.
+Then, we evaluated additional cues. The frequency branch improved transformation classification, confirming that spectral information is useful for post-processing recognition, but it reduced fake detection accuracy. The depth branch produced a strong and stable multimodal baseline, suggesting that estimated geometric cues can complement RGB features.
+
+We also tested an explicit edge-consistency branch based on RGB/depth disagreement. This branch slightly improved transformation accuracy, but decreased fake accuracy, probably because it introduced additional noise and complexity when depth estimates were imperfect. For this reason, RGB + Depth was preferred as the main geometry model.
+
+The RGB + Depth + Frequency model offered a reasonable trade-off, slightly improving transformation classification compared to RGB + Depth. However, the gated fusion variant did not improve the overall result: it improved fake detection on re-digitized images, but strongly reduced transformation classification accuracy. Grad-CAM analysis suggested that the gated model focused on smaller and more fragmented regions, while the simpler RGB + Depth model attended to broader and more coherent scene areas.
+
+Finally, ViT-based experiments were introduced as an architectural comparison with the ResNet-based models. Overall, ViT achieved stronger results, especially on transformation classification, suggesting that global patch-level attention is more effective for capturing long-range visual and forensic patterns in this joint detection setting.
+
+Overall, the final model selection was based on the trade-off between fake detection and transformation classification, rather than on a single isolated metric.
+
 
 ---
 
