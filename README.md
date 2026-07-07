@@ -12,10 +12,10 @@ Alessandro Esposito · Alessandro Piccolino · Annalisa Verrando
 
 This project implements a unified multi-task deep learning framework that simultaneously addresses two forensic questions given a single input image:
 
-1. **Real or fake?** — is the image a genuine photograph or AI-generated?
-2. **What post-processing was applied?** — original, internet-transmitted, or re-digitized?
+1. **Real or fake?**: is the image a genuine photograph or AI-generated?
+2. **What post-processing was applied?**: original, internet-transmitted, or re-digitized?
 
-The core observation motivating this work is that AI-generated image detectors are typically evaluated on clean, uncompressed images. In practice, images circulating online have almost always undergone some form of post-processing — compression, re-uploading, re-digitization — that disrupts detector performance. This project investigates whether jointly predicting authenticity and post-processing type leads to more robust detection.
+The core observation motivating this work is that AI-generated image detectors are typically evaluated on clean, uncompressed images. In practice, images circulating online have almost always undergone some form of post-processing, such as compression, re-uploading, re-digitization, that disrupts detector performance. This project investigates whether jointly predicting authenticity and post-processing type leads to more robust detection.
 
 ---
 ## Experimental roadmap
@@ -28,13 +28,13 @@ Finally, ViT-based models were evaluated as an alternative to the ResNet backbon
 
 ## Dataset
 
-**RRDataset** — a real-world robustness benchmark combining real photographs and AI-generated images across three post-processing conditions:
+**RRDataset**: a real-world robustness benchmark combining real photographs and AI-generated images across three post-processing conditions:
 
 | Split | Description |
 |---|---|
 | Original | Images closest to ideal benchmark conditions |
 | Internet-transmitted | Platform compression, resizing, social-media artifacts |
-| Re-digitized | Re-photographed, scanned, printed or displayed — blur, color shifts, geometric distortions |
+| Re-digitized | Re-photographed, scanned, printed or displayed |
 
 ### Subset used
 
@@ -190,8 +190,7 @@ pip install -r requirements.txt
 pip install timm   # required for ViT models
 ```
 
-The project is designed to run on **Google Colab free tier** (T4 GPU). Set `--num_workers 0` on Colab to avoid DataLoader issues.
-
+The project is designed to run on **Google Colab free tier** (T4 GPU). 
 ---
 
 ## Usage
@@ -231,7 +230,28 @@ python src/FrequencyAugumented.py \
     --loss_weighting learned \
     --checkpoint_name best_freq_learned_cosine.pt
 
-# ViT RGB multitask (λ=1/2) — use batch_size 16 for ViT
+# RGB + Depth
+python src/train_depth.py \
+  --train_csv data/splits/train_balanced.csv \
+  --val_csv   data/splits/val_balanced.csv \
+  --image_root data/raw/RRDataset_subset \
+  --depth_root drive/MyDrive/CV_Project/depth_maps \
+  --checkpoint_name best_depth_uncertainty.pt \
+  --epochs 10 --batch_size 32 --num_workers 0 \
+  --use_uncertainty_weighting \
+  --no_edge
+
+# RGB + Depth + Frequency
+python src/train_depth_frequency.py \
+  --train_csv data/splits/train_balanced.csv \
+  --val_csv   data/splits/val_balanced.csv \
+  --image_root data/raw/RRDataset_subset \
+  --depth_root drive/MyDrive/CV_Project/depth_maps \
+  --checkpoint_name best_depth_frequency_uncertainty.pt \
+  --epochs 10 --batch_size 32 --num_workers 0 \
+  --use_uncertainty_weighting 
+
+# ViT RGB multitask (λ=1/2) 
 python src/train_vit_RGB_1_2.py \
     --train_csv data/splits/train_balanced.csv \
     --val_csv   data/splits/val_balanced.csv \
@@ -260,6 +280,24 @@ python src/evaluate_freq.py \
     --output_dir results/freq_learned_cosine \
     --batch_size 32 --num_workers 0
 
+# RGB + Depth
+python src/evaluate_depth.py \
+  --csv_path data/splits/test_balanced.csv \
+  --image_root data/raw/RRDataset_subset \
+  --depth_root drive/MyDrive/CV_Project/depth_maps \
+  --checkpoint checkpoints/best_depth_uncertainty.pt \
+  --output_dir results/depth_only \
+  --batch_size 32 --num_workers 0
+
+# RGB + Depth + Frequency
+python src/evaluation_depth_frequency.py \
+  --csv_path data/splits/test_balanced.csv \
+  --image_root data/raw/RRDataset_subset \
+  --depth_root drive/MyDrive/CV_Project/depth_maps \
+  --checkpoint checkpoints/best_depth_frequency_uncertainty.pt \
+  --output_dir results/depth_frequency_uncertainty \
+  --batch_size 32 --num_workers 0
+
 # ViT
 python src/evaluate_vit_RGB.py \
     --task multitask \
@@ -270,14 +308,6 @@ python src/evaluate_vit_RGB.py \
     --batch_size 16 --num_workers 0
 ```
 
-### Compare all models
-
-```python
-# In notebook or as script
-from compare_all import build_comparison_table, plot_comparison
-df = build_comparison_table()
-plot_comparison(df)
-```
 
 ---
 
@@ -308,6 +338,7 @@ The ablation study on loss weights (λ_fake / λ_transform) shows that the 1/2 c
 The depth branch produces a strong and stable multimodal baseline. The explicit edge-consistency branch (RGB/depth disagreement) improved transformation accuracy but decreased fake accuracy, and was not selected as the primary model.
 
 The ViT-based experiments were introduced as an architectural comparison with the ResNet-based models. Overall, ViT achieved stronger results, especially on transformation classification, suggesting that global patch-level attention is more effective for capturing long-range visual and forensic patterns in this joint detection setting.
+
 ---
 
 ## References
