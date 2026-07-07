@@ -22,10 +22,10 @@ except ImportError:
 # Only the model class and the tqdm description change.
 
 def train_one_epoch(model, loader, optimizer, device,
-                    lambda_fake=1.0, lambda_transform=2.0, uncertainty_loss=None):
+                    lambda_fake=1.0, lambda_transform=1.0, uncertainty_loss=None):
     """
     Train the ViT + depth + frequency model for one epoch.
-    lambda_fake=1.0, lambda_transform=2.0 are the defaults for this experiment.
+    lambda_fake=1.0, lambda_transform=1.0 are the defaults for this experiment.
     """
 
     model.train()
@@ -91,7 +91,7 @@ def train_one_epoch(model, loader, optimizer, device,
 
 @torch.no_grad()
 def evaluate(model, loader, device,
-             lambda_fake=1.0, lambda_transform=2.0, uncertainty_loss=None):
+             lambda_fake=1.0, lambda_transform=1.0, uncertainty_loss=None):
     """
     Evaluate the ViT + depth + frequency model on the validation set.
     Identical to evaluate() in train_depth_frequency.py.
@@ -157,13 +157,13 @@ def evaluate(model, loader, device,
 def main():
     """
     Train the ViT-Small + depth + frequency model with lambda_fake=1.0,
-    lambda_transform=2.0.
+    lambda_transform=1.0.
 
     This script is the direct ViT alternative to:
         python src/train_depth_frequency.py \\
-            --lambda_fake 1.0 --lambda_transform 2.0
+            --lambda_fake 1.0 --lambda_transform 1.0
 
-    The loss weighting 1.0/2.0 gives twice the importance to the
+    The loss weighting 1.0/1.0 gives twice the importance to the
     transformation task. Useful when transform classification is harder
     than fake/real detection.
 
@@ -180,7 +180,7 @@ def main():
     """
 
     parser = argparse.ArgumentParser(
-        description="Train ViT-Small + depth + frequency — lambda_fake=1.0, lambda_transform=2.0."
+        description="Train ViT-Small + depth + frequency — lambda_fake=1.0, lambda_transform=1.0."
     )
 
     parser.add_argument("--train_csv",   type=str, required=True)
@@ -197,11 +197,11 @@ def main():
     parser.add_argument("--num_workers",  type=int,   default=0)
     parser.add_argument("--patience",     type=int,   default=4)
 
-    # Loss weights — fixed at 1.0/2.0 as defaults to match this experiment.
+    # Loss weights — fixed at 1.0/1.0 as defaults to match this experiment.
     parser.add_argument("--lambda_fake",      type=float, default=1.0,
                         help="Weight of the real/fake loss (default 1.0).")
-    parser.add_argument("--lambda_transform", type=float, default=2.0,
-                        help="Weight of the transformation loss (default 2.0).")
+    parser.add_argument("--lambda_transform", type=float, default=1.0,
+                        help="Weight of the transformation loss (default 1.0).")
     parser.add_argument("--use_uncertainty_weighting", action="store_true",
                         help="Use learnable uncertainty weighting instead of fixed lambdas.")
 
