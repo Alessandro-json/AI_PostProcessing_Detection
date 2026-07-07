@@ -273,7 +273,7 @@ plot_comparison(df)
 | RGB multitask learned | 92.22% | 78.34% |
 | Frequency 1/1 | 90.22% | 82.44% |
 | RGB + Depth | 93.56% | ~80% |
-| RGB + Depth + Frequency | see results/ | see results/ |
+| RGB + Depth + Frequency | 92.44% | 80.67% |
 | ViT variants | see results/ | see results/ |
 
 Re-digitization is consistently the hardest condition for real/fake detection across all models. The two tasks show mild competition: configurations that improve transformation accuracy tend to slightly decrease fake accuracy.
