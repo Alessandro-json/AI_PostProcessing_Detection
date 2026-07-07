@@ -269,7 +269,7 @@ plot_comparison(df)
 | RGB single-task (transform-only) | — | 81.33% |
 | RGB multitask 1/1 | 92.22% | 78.22% |
 | RGB multitask 1/2 (best RGB) | 92.67% | 82.22% |
-| RGB multitask 2/1 | 92447% | 80.22% |
+| RGB multitask 2/1 | 92.47% | 80.22% |
 | RGB multitask learned | 92.22% | 78.34% |
 | Frequency 1/1 | 90.22% | 82.44% |
 | RGB + Depth | 93.56% | ~80% |
