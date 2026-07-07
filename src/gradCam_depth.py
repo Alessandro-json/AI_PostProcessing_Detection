@@ -21,11 +21,6 @@ IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
 def load_checkpoint(model, checkpoint_path, device):
     """
     Load trained weights into the RGB + depth model.
-
-    This function supports checkpoints saved as:
-    1. {"model_state_dict": ...}
-    2. {"state_dict": ...}
-    3. a raw model state_dict.
     """
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -69,41 +64,18 @@ class RGBBranchGradCAM:
         )
 
     def _save_activations(self, module, inputs, output):
-        """
-        Save the feature maps produced by the selected convolutional layer.
-        """
-
         self.activations = output
 
     def _save_gradients(self, module, grad_input, grad_output):
-        """
-        Save gradients of the selected class score with respect to the feature maps.
-        """
-
         self.gradients = grad_output[0]
 
     def remove_hooks(self):
-        """
-        Remove registered hooks after Grad-CAM computation.
-        """
-
         self.forward_hook.remove()
         self.backward_hook.remove()
 
     def generate(self, images, depth, edge_consistency, task, target_class=None):
         """
         Generate Grad-CAM heatmaps for a batch of images.
-
-        Args:
-            images: normalized RGB tensor with shape [B, 3, H, W].
-            depth: depth tensor with shape [B, 1, H, W].
-            edge_consistency: optional edge-consistency tensor.
-            task: either "fake" or "transform".
-            target_class: optional fixed class index. If None, the predicted class is used.
-
-        Returns:
-            cam: normalized Grad-CAM heatmap with shape [B, 1, H, W].
-            predicted_class: predicted class index for each image.
         """
 
         self.model.zero_grad(set_to_none=True)
@@ -379,12 +351,6 @@ def parse_args():
 def main():
     """
     Main Grad-CAM pipeline.
-
-    Steps:
-    1. Load the RGB + depth dataset.
-    2. Build and load the trained model.
-    3. Register Grad-CAM hooks on the RGB ResNet branch.
-    4. Generate Grad-CAM visualizations for selected images.
     """
 
     args = parse_args()
@@ -403,16 +369,11 @@ def main():
         train=False,
     )
 
-	# Optionally filter the dataset by real/fake label.
-	# This is useful because the CSV may be ordered, so the first images can all belong
-	# to the same class.
     if args.fake_filter is not None:
         dataset.data = dataset.data[
 			dataset.data["fake_label"] == args.fake_filter
 		].reset_index(drop=True)
 
-	# Optionally filter the dataset by transformation label.
-	# 0 = original, 1 = transfer, 2 = redigital.
     if args.transform_filter is not None:
         dataset.data = dataset.data[
 			dataset.data["transform_label"] == args.transform_filter
@@ -424,7 +385,6 @@ def main():
 			"Check --fake_filter and --transform_filter."
 		)
 
-	# Use a fixed generator when shuffling to make the selected images reproducible.
     generator = torch.Generator()
     generator.manual_seed(args.seed)
 
@@ -452,8 +412,6 @@ def main():
     model = model.to(device)
     model.eval()
 
-    # The target layer is the last ResNet block of the RGB branch.
-    # It still contains spatial information, which is required for Grad-CAM.
     target_layer = model.rgb_backbone.layer4[-1]
 
     gradcam = RGBBranchGradCAM(

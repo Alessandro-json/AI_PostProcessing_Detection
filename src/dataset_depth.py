@@ -1,5 +1,3 @@
-# geometric_dataset.py
-
 from pathlib import Path
 import random
 
@@ -12,8 +10,6 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset
 from torchvision.transforms import functional as TF
 
-
-# ImageNet normalization values because the RGB backbone is pretrained on ImageNet.
 IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
 IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
 
@@ -22,7 +18,7 @@ def normalize_01(array: np.ndarray) -> np.ndarray:
     """
     Normalize a numpy array to the [0, 1] range.
 
-    This is useful for depth maps because different depth estimators may output
+    Different depth maps estimators may output
     different value ranges.
     """
     array = array.astype(np.float32)
@@ -39,17 +35,6 @@ def normalize_01(array: np.ndarray) -> np.ndarray:
 def find_depth_path(depth_root: Path, image_rel_path: str) -> Path:
     """
     Find the depth map corresponding to an image.
-
-    The expected structure is:
-        image_root / image_path
-        depth_root / image_path_with_npy_extension
-
-    Example:
-        CSV image_path:
-            original/real/img001.jpg
-
-        Expected depth path:
-            depth_root/original/real/img001.npy
     """
     rel_path = Path(image_rel_path)
     depth_path = depth_root / rel_path.with_suffix(".npy")
@@ -67,12 +52,6 @@ def find_depth_path(depth_root: Path, image_rel_path: str) -> Path:
 def rgb_to_grayscale(rgb_tensor: torch.Tensor) -> torch.Tensor:
     """
     Convert RGB image tensor to grayscale.
-
-    Args:
-        rgb_tensor: Tensor [3, H, W] in [0, 1]
-
-    Returns:
-        Tensor [1, H, W]
     """
     r = rgb_tensor[0:1]
     g = rgb_tensor[1:2]
@@ -84,17 +63,10 @@ def rgb_to_grayscale(rgb_tensor: torch.Tensor) -> torch.Tensor:
 def sobel_edges(single_channel_tensor: torch.Tensor) -> torch.Tensor:
     """
     Compute Sobel edge magnitude for a single-channel tensor.
-
-    Args:
-        single_channel_tensor: Tensor [1, H, W]
-
-    Returns:
-        Edge magnitude tensor [1, H, W], normalized to [0, 1]
     """
     if single_channel_tensor.dim() != 3 or single_channel_tensor.shape[0] != 1:
         raise ValueError("sobel_edges expects a tensor with shape [1, H, W].")
 
-    # Add batch dimension: [1, 1, H, W]
     x = single_channel_tensor.unsqueeze(0)
 
     sobel_x = torch.tensor(
@@ -117,7 +89,6 @@ def sobel_edges(single_channel_tensor: torch.Tensor) -> torch.Tensor:
 
     edges = torch.sqrt(grad_x ** 2 + grad_y ** 2 + 1e-8)
 
-    # Remove batch dimension: [1, H, W]
     edges = edges.squeeze(0)
 
     max_val = edges.max()
@@ -132,9 +103,7 @@ class RRGeometricDatasetFromCSV(Dataset):
     """
     Dataset for RGB + depth + edge-depth consistency.
 
-    It uses the same CSV logic as the existing training code.
-
-    Expected CSV columns:
+    Expected columns:
         image_path
         fake_label
         transform_label
@@ -164,7 +133,6 @@ class RRGeometricDatasetFromCSV(Dataset):
         self.image_size = image_size
         self.train = train
 
-        # Read the CSV file exactly like the baseline dataset does.
         self.data = pd.read_csv(self.csv_path)
 
         required_columns = {"image_path", "fake_label", "transform_label"}
@@ -192,24 +160,20 @@ class RRGeometricDatasetFromCSV(Dataset):
         # Build corresponding depth map path.
         depth_path = find_depth_path(self.depth_root, image_rel_path)
 
-        # Load RGB image.
         image = Image.open(image_path).convert("RGB")
 
-        # Load precomputed depth map.
         depth_array = np.load(depth_path)
 
         # In case the saved depth has an extra singleton dimension, remove it.
         if depth_array.ndim == 3:
             depth_array = depth_array.squeeze()
 
-        # Normalize depth map to [0, 1].
+        # Normalize depth maps
         depth_array = normalize_01(depth_array)
 
         # Convert depth map to PIL image so that resize/flips are easy.
         depth_uint8 = (depth_array * 255).astype(np.uint8)
         depth_image = Image.fromarray(depth_uint8, mode="L")
-
-        # Resize RGB and depth to the same size.
         image = TF.resize(image, [self.image_size, self.image_size])
         depth_image = TF.resize(depth_image, [self.image_size, self.image_size])
 
@@ -218,7 +182,6 @@ class RRGeometricDatasetFromCSV(Dataset):
             image = TF.hflip(image)
             depth_image = TF.hflip(depth_image)
 
-        # Convert to tensors in [0, 1].
         rgb_raw = TF.to_tensor(image)
         depth_tensor = TF.to_tensor(depth_image)
 
@@ -227,11 +190,8 @@ class RRGeometricDatasetFromCSV(Dataset):
         rgb_edges = sobel_edges(gray_rgb)
         depth_edges = sobel_edges(depth_tensor)
 
-        # Edge-depth consistency map:
         # high values mean RGB edges and depth edges disagree.
         edge_consistency = torch.abs(rgb_edges - depth_edges)
-
-        # Normalize RGB for pretrained ResNet.
         image_tensor = (rgb_raw - IMAGENET_MEAN) / IMAGENET_STD
 
         fake_label = torch.tensor(int(row["fake_label"]), dtype=torch.long)

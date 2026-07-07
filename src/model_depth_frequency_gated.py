@@ -51,9 +51,6 @@ class RGBDepthFrequencyMultiTaskModel(nn.Module):
     representation for both tasks, this model learns two different modality
     gates:
 
-    1. one gate for the real/fake task
-    2. one gate for the transformation task
-
     This allows the model to learn whether RGB, depth, or frequency is more
     useful for each specific task.
     """
@@ -70,7 +67,6 @@ class RGBDepthFrequencyMultiTaskModel(nn.Module):
     ):
         super().__init__()
 
-        # RGB branch: ResNet18 backbone.
         try:
             weights = models.ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
             self.rgb_backbone = models.resnet18(weights=weights)
@@ -158,7 +154,6 @@ class RGBDepthFrequencyMultiTaskModel(nn.Module):
         )
 
     def forward(self, images, depth, frequency):
-        # Extract modality-specific features.
         rgb_features = self.rgb_backbone(images)
         depth_features = self.depth_encoder(depth)
         frequency_features = self.frequency_encoder(frequency)
@@ -168,13 +163,11 @@ class RGBDepthFrequencyMultiTaskModel(nn.Module):
         depth_features = self.depth_projector(depth_features)
         frequency_features = self.frequency_projector(frequency_features)
 
-        # Shape: [batch_size, 3, shared_dim]
         modality_features = torch.stack(
             [rgb_features, depth_features, frequency_features],
             dim=1,
         )
 
-        # Shape: [batch_size, shared_dim * 3]
         gate_input = torch.cat(
             [rgb_features, depth_features, frequency_features],
             dim=1,
@@ -206,8 +199,6 @@ class RGBDepthFrequencyMultiTaskModel(nn.Module):
         return {
             "fake_logits": fake_logits,
             "transform_logits": transform_logits,
-
-            # These are useful for analysis, but not used for the loss.
             "fake_modality_weights": fake_weights,
             "transform_modality_weights": transform_weights,
         }

@@ -10,8 +10,6 @@ class SmallMapEncoder(nn.Module):
     This encoder is used for:
     1. depth maps
     2. frequency maps
-
-    It converts a [B, 1, H, W] input into a compact feature vector.
     """
 
     def __init__(self, out_features=128):
@@ -41,21 +39,12 @@ class SmallMapEncoder(nn.Module):
         )
 
     def forward(self, x):
-        """
-        Encode a single-channel map into a feature vector.
-        """
-
         return self.encoder(x)
 
 
 class RGBDepthFrequencyMultiTaskModel(nn.Module):
     """
     Multi-task model using RGB, depth, and frequency information.
-
-    The model has three input branches:
-    1. RGB branch based on ResNet18.
-    2. Depth branch based on a lightweight CNN.
-    3. Frequency branch based on a lightweight CNN.
 
     The extracted features are concatenated and passed through a fusion block.
     The fused representation is then used by two heads:
@@ -74,7 +63,6 @@ class RGBDepthFrequencyMultiTaskModel(nn.Module):
         super().__init__()
 
         # Load the RGB backbone.
-        # The ImageNet pretrained ResNet helps the RGB branch start from useful visual features.
         try:
             weights = models.ResNet18_Weights.DEFAULT if pretrained else None
             self.rgb_backbone = models.resnet18(weights=weights)
@@ -83,7 +71,6 @@ class RGBDepthFrequencyMultiTaskModel(nn.Module):
 
         rgb_features = self.rgb_backbone.fc.in_features
 
-        # Remove the original classification layer.
         # The backbone will output RGB feature vectors.
         self.rgb_backbone.fc = nn.Identity()
 
@@ -128,15 +115,7 @@ class RGBDepthFrequencyMultiTaskModel(nn.Module):
 
     def forward(self, images, depth, frequency):
         """
-        Forward pass.
-
-        Args:
-            images: RGB image tensor with shape [B, 3, H, W].
-            depth: depth map tensor with shape [B, 1, H, W].
-            frequency: frequency map tensor with shape [B, 1, H, W].
-
-        Returns:
-            Dictionary containing logits for both tasks.
+        Forward pass
         """
 
         rgb_features = self.rgb_backbone(images)

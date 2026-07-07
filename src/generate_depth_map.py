@@ -1,5 +1,3 @@
-# generate_depth_maps.py
-
 import argparse
 from pathlib import Path
 
@@ -14,8 +12,6 @@ import torch.nn.functional as F
 
 def load_midas_model(model_type: str, device):
     """
-    Load a pretrained MiDaS model from PyTorch Hub.
-
     This model is used only to estimate depth maps before training.
     We do not train MiDaS.
     """
@@ -23,7 +19,6 @@ def load_midas_model(model_type: str, device):
     # Trust only the official repositories needed by MiDaS.
     trust_torch_hub_repositories()
 
-    # Load pretrained MiDaS model without interactive prompts.
     midas = torch.hub.load(
         "intel-isl/MiDaS",
         model_type,
@@ -49,8 +44,6 @@ def load_midas_model(model_type: str, device):
 
 def trust_torch_hub_repositories():
     """
-    Add the official Torch Hub repositories used by MiDaS to the trusted list.
-
     This avoids interactive trust prompts in Colab for:
     1. intel-isl/MiDaS
     2. rwightman/gen-efficientnet-pytorch
@@ -87,31 +80,17 @@ def trust_torch_hub_repositories():
 def compute_depth_for_image(image_path: Path, midas, transform, device):
     """
     Compute a depth map for a single RGB image.
-
-    Args:
-        image_path: path to the RGB image.
-        midas: pretrained MiDaS model.
-        transform: MiDaS preprocessing transform.
-        device: cuda or cpu.
-
-    Returns:
-        depth_map: numpy array with shape [H, W].
     """
 
-    # Load image and convert to RGB.
     image = Image.open(image_path).convert("RGB")
 
-    # Convert PIL image to numpy array because MiDaS transforms expect numpy RGB.
     image_np = np.array(image)
 
-    # Apply MiDaS preprocessing.
     input_batch = transform(image_np).to(device)
 
     with torch.no_grad():
-        # Predict relative depth.
         prediction = midas(input_batch)
 
-        # Resize prediction back to the original image size.
         prediction = F.interpolate(
             prediction.unsqueeze(1),
             size=image_np.shape[:2],
@@ -119,7 +98,6 @@ def compute_depth_for_image(image_path: Path, midas, transform, device):
             align_corners=False,
         ).squeeze()
 
-    # Move result to CPU and convert to numpy.
     depth_map = prediction.cpu().numpy().astype(np.float32)
 
     return depth_map
@@ -128,12 +106,6 @@ def compute_depth_for_image(image_path: Path, midas, transform, device):
 def collect_unique_image_paths(csv_paths, image_root: Path):
     """
     Read one or more CSV files and collect all unique image paths.
-
-    The CSV files must contain the column:
-        image_path
-
-    This follows the same logic as train.py:
-    image_root + image_path gives the full RGB image path.
     """
 
     all_relative_paths = []
@@ -165,13 +137,6 @@ def collect_unique_image_paths(csv_paths, image_root: Path):
 def main():
     """
     Main function.
-
-    This script:
-        1. Reads CSV files.
-        2. Finds all RGB images.
-        3. Loads a pretrained MiDaS depth model.
-        4. Computes one depth map for each RGB image.
-        5. Saves each depth map as .npy using the same relative path.
     """
 
     parser = argparse.ArgumentParser()

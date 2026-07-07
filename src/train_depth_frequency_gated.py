@@ -26,10 +26,6 @@ def train_one_epoch(
 ):
     """
     Train the RGB + depth + frequency model for one epoch.
-
-    The model predicts:
-    1. real/fake label.
-    2. transformation label.
     """
 
     model.train()
@@ -64,7 +60,6 @@ def train_one_epoch(
             transform_labels,
         )
 
-        # Combine the two task losses.
         # If uncertainty weighting is enabled, the task weights are learned.
         # Otherwise, fixed lambda values are used.
         if uncertainty_loss is not None:
@@ -150,7 +145,6 @@ def evaluate(
         )
 
         # Use the same loss combination strategy during validation.
-        # This affects only validation loss, not accuracy computation.
         if uncertainty_loss is not None:
             loss, loss_info = uncertainty_loss(fake_loss, transform_loss)
             weight_fake_sum += loss_info["weight_fake"]
@@ -264,13 +258,6 @@ def parse_args():
 def main():
     """
     Main training pipeline.
-
-    Steps:
-    1. Read arguments.
-    2. Build datasets and dataloaders.
-    3. Build the RGB + depth + frequency model.
-    4. Train and validate the model.
-    5. Save the best checkpoint according to validation score.
     """
 
     args = parse_args()
@@ -332,8 +319,6 @@ def main():
     else:
         uncertainty_loss = None
 
-    # If uncertainty weighting is enabled, the optimizer must also update
-    # the learnable log-variance parameters of the loss function.
     if uncertainty_loss is not None:
         optimizer = torch.optim.AdamW(
             list(model.parameters()) + list(uncertainty_loss.parameters()),

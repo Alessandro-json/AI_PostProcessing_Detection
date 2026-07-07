@@ -1,5 +1,3 @@
-# train_geometric.py
-
 import argparse
 from pathlib import Path
 
@@ -98,16 +96,6 @@ def evaluate(
 ):
     """
     Evaluate the geometric multi-task model on validation data.
-
-    Args:
-        model: The trained model.
-        loader: Validation DataLoader.
-        device: "cuda" or "cpu".
-        lambda_fake: Weight of the real/fake loss.
-        lambda_transform: Weight of the transformation loss.
-
-    Returns:
-        Dictionary with validation loss and accuracies.
     """
 
     model.eval()
@@ -129,7 +117,6 @@ def evaluate(
         fake_labels = batch["fake_label"].to(device)
         transform_labels = batch["transform_label"].to(device)
 
-        # Forward pass only. No gradients are stored during validation.
         outputs = model(
             images=images,
             depth=depth,
@@ -146,12 +133,10 @@ def evaluate(
             transform_labels,
         )
 		# Use the same loss combination strategy during validation.
-		# This affects only the validation loss, not the accuracy computation.
         if uncertainty_loss is not None:
             loss, loss_info = uncertainty_loss(fake_loss, transform_loss)
         else:
             loss = lambda_fake * fake_loss + lambda_transform * transform_loss
-        #loss = lambda_fake * fake_loss + lambda_transform * transform_loss
 
         batch_size = images.size(0)
         total_loss += loss.item() * batch_size
@@ -174,28 +159,15 @@ def evaluate(
 def main():
     """
     Main training function for the geometric model.
-
-    This follows the same structure as train.py:
-        1. Read command-line arguments.
-        2. Create datasets and dataloaders.
-        3. Create the model.
-        4. Create optimizer and scheduler.
-        5. Train and validate.
-        6. Save the best checkpoint.
     """
 
     parser = argparse.ArgumentParser()
-
-    # Same arguments as the RGB baseline.
     parser.add_argument("--train_csv", type=str, required=True)
     parser.add_argument("--val_csv", type=str, required=True)
     parser.add_argument("--image_root", type=str, required=True)
-
-    # New argument for geometric training:
-    # folder containing precomputed depth maps.
     parser.add_argument("--depth_root", type=str, required=True)
 
-    # Training hyperparameters.
+    #hyperparameters
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -204,15 +176,12 @@ def main():
     parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--patience", type=int, default=4)
     parser.add_argument("--checkpoint_name", type=str, default="best_geometric.pt")
-
-    # Multi-task loss weights.
     parser.add_argument("--lambda_fake", type=float, default=1.0)
     parser.add_argument("--lambda_transform", type=float, default=1.0)
 
     # Checkpoint folder.
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints")
 
-    # Optional switches for ablation studies.
     parser.add_argument(
         "--no_edge",
         action="store_true",
@@ -233,16 +202,12 @@ def main():
 
     args = parser.parse_args()
 
-    # Select GPU if available.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Create checkpoint folder if needed.
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    # Training dataset:
-    # reads the same CSV as the RGB baseline, but also loads depth maps.
     train_dataset = RRGeometricDatasetFromCSV(
         csv_path=args.train_csv,
         image_root=args.image_root,
@@ -251,7 +216,6 @@ def main():
         train=True,
     )
 
-    # Validation dataset.
     val_dataset = RRGeometricDatasetFromCSV(
         csv_path=args.val_csv,
         image_root=args.image_root,
@@ -260,7 +224,6 @@ def main():
         train=False,
     )
 
-    # DataLoaders create mini-batches.
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
@@ -277,7 +240,6 @@ def main():
         pin_memory=(device.type == "cuda"),
     )
 
-    # Create the geometric multi-task model.
     model = GeometricMultiTaskModel(
         num_transform_classes=3,
         pretrained=True,
@@ -294,8 +256,6 @@ def main():
 
     model = model.to(device)
 
-    # If uncertainty weighting is enabled, the optimizer must also update
-	# the learnable log-variance parameters of the loss function.
     if uncertainty_loss is not None:
         optimizer = torch.optim.AdamW(
 			list(model.parameters()) + list(uncertainty_loss.parameters()),
@@ -309,7 +269,6 @@ def main():
 			weight_decay=args.weight_decay,
 		)
 
-    # Reduce LR when validation loss stops improving.
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode="min",
@@ -345,7 +304,6 @@ def main():
         print(f"Train: {train_metrics}")
         print(f"Val:   {val_metrics}")
 
-        # Combined validation score for the two tasks.
         val_score = 0.5 * val_metrics["fake_acc"] + 0.5 * val_metrics["transform_acc"]
 
         scheduler.step(val_metrics["loss"])

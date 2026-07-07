@@ -59,7 +59,6 @@ def load_model(checkpoint_path, device, use_attention=True, pretrained=True):
     else:
         state_dict = checkpoint
 
-    # Remove possible "module." prefix if the model was trained with DataParallel.
     cleaned_state_dict = {}
     for key, value in state_dict.items():
         if key.startswith("module."):

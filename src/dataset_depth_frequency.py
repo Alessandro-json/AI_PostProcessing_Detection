@@ -14,9 +14,6 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 
 
 def normalize_01(array):
-    """
-    Normalize a numpy array to the [0, 1] range.
-    """
 
     array = array.astype(np.float32)
     min_value = array.min()
@@ -55,12 +52,6 @@ def find_depth_path(depth_root, image_rel_path):
 def rgb_to_grayscale(rgb_tensor):
     """
     Convert an RGB tensor in [0, 1] to a grayscale tensor.
-
-    Args:
-        rgb_tensor: tensor with shape [3, H, W].
-
-    Returns:
-        grayscale tensor with shape [1, H, W].
     """
 
     red = rgb_tensor[0:1]
@@ -85,10 +76,8 @@ def compute_frequency_map(rgb_tensor):
 
     gray = rgb_to_grayscale(rgb_tensor).squeeze(0)
 
-    # Compute 2D Fourier transform.
     fft = torch.fft.fft2(gray)
 
-    # Move low frequencies to the center.
     fft_shifted = torch.fft.fftshift(fft)
 
     # Use log magnitude for numerical stability and better visualization.
@@ -141,10 +130,6 @@ class RRDepthFrequencyDatasetFromCSV(Dataset):
             )
 
     def __len__(self):
-        """
-        Return the number of samples in the dataset.
-        """
-
         return len(self.data)
 
     def __getitem__(self, index):
@@ -164,10 +149,8 @@ class RRDepthFrequencyDatasetFromCSV(Dataset):
         if not image_path.exists():
             raise FileNotFoundError(f"RGB image not found: {image_path}")
 
-        # Load RGB image.
         image = Image.open(image_path).convert("RGB")
 
-        # Load precomputed depth map.
         depth_array = np.load(depth_path)
         depth_array = normalize_01(depth_array)
 
@@ -192,13 +175,11 @@ class RRDepthFrequencyDatasetFromCSV(Dataset):
             image = ImageOps.mirror(image)
             depth_image = ImageOps.mirror(depth_image)
 
-        # Convert RGB to tensor in [0, 1].
         rgb_raw = TF.to_tensor(image)
 
-        # Compute frequency map from the raw RGB tensor.
         frequency = compute_frequency_map(rgb_raw)
 
-        # Normalize RGB for ResNet.
+        # Normalize for ResNet.
         image_tensor = TF.normalize(
             rgb_raw,
             mean=IMAGENET_MEAN,

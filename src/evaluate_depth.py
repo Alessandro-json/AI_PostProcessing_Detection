@@ -25,27 +25,17 @@ def load_checkpoint(model, checkpoint_path, device):
     """
     Load trained weights into the depth-based model.
 
-    Different training scripts may save checkpoints in different formats:
-    1. Only the model state_dict.
-    2. A dictionary containing "model_state_dict".
-    3. A dictionary containing "state_dict".
-
-    This function supports all three common cases.
+    To avoid other problems with checkpoints we check
+    different types
     """
-
-    # Load checkpoint on the selected device.
-    # map_location avoids errors when loading a GPU checkpoint on CPU.
     checkpoint = torch.load(checkpoint_path, map_location=device)
 
-    # Case 1: checkpoint saved as {"model_state_dict": ...}
     if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
         model.load_state_dict(checkpoint["model_state_dict"])
 
-    # Case 2: checkpoint saved as {"state_dict": ...}
     elif isinstance(checkpoint, dict) and "state_dict" in checkpoint:
         model.load_state_dict(checkpoint["state_dict"])
 
-    # Case 3: checkpoint is directly the model state_dict.
     else:
         model.load_state_dict(checkpoint)
 
@@ -58,20 +48,15 @@ def evaluate_model(model, dataloader, device, task, use_edge=True):
 
     The model receives RGB images and precomputed depth maps.
     If use_edge is True, the edge-consistency map is also passed to the model.
-    Logits are converted into predicted classes using argmax.
     """
 
-    # Set the model to evaluation mode.
     model.eval()
-
-    # This list will contain one dictionary per image.
     rows = []
 
     # Disable gradient computation during evaluation.
     # This saves memory and makes inference faster.
     with torch.no_grad():
 
-        # Loop over test batches.
         for batch in dataloader:
 
             # Move RGB images and depth maps to GPU if available, otherwise CPU.
@@ -88,7 +73,6 @@ def evaluate_model(model, dataloader, device, task, use_edge=True):
                     )
                 edge_consistency = batch["edge_consistency"].to(device)
 
-            # Forward pass through the depth-based model.
             outputs = model(
                 images=images,
                 depth=depth,
@@ -115,12 +99,10 @@ def evaluate_model(model, dataloader, device, task, use_edge=True):
                     "image_path": batch["image_path"][i],
                 }
 
-                # Save real/fake prediction fields only when this task is active.
                 if task in ["fake", "multitask"]:
                     row["true_fake"] = int(true_fake[i].cpu())
                     row["pred_fake"] = int(pred_fake[i].cpu())
 
-                # Save transformation prediction fields only when this task is active.
                 if task in ["transform", "multitask"]:
                     row["true_transform"] = int(true_transform[i].cpu())
                     row["pred_transform"] = int(pred_transform[i].cpu())
@@ -133,8 +115,6 @@ def evaluate_model(model, dataloader, device, task, use_edge=True):
 
                 rows.append(row)
 
-    # Convert collected rows into a DataFrame.
-    # This makes metric computation and CSV export easier.
     return pd.DataFrame(rows)
 
 
@@ -205,23 +185,20 @@ def save_confusion_matrix(y_true, y_pred, labels, title, output_path):
     Create and save a confusion matrix plot.
     """
 
-    # Build numeric confusion matrix.
+    # Confusion matrix.
     cm = confusion_matrix(
         y_true,
         y_pred,
         labels=list(range(len(labels))),
     )
 
-    # Create a sklearn display object.
     display = ConfusionMatrixDisplay(
         confusion_matrix=cm,
         display_labels=labels,
     )
 
-    # Create the figure.
     fig, ax = plt.subplots(figsize=(6, 5))
 
-    # Plot the confusion matrix.
     display.plot(
         ax=ax,
         cmap="Blues",
@@ -229,7 +206,6 @@ def save_confusion_matrix(y_true, y_pred, labels, title, output_path):
         colorbar=False,
     )
 
-    # Add title and save to file.
     ax.set_title(title)
     plt.tight_layout()
     plt.savefig(output_path, dpi=200)
@@ -257,12 +233,9 @@ def save_results(predictions_df, metrics, output_dir, task):
 
     # Save one row per evaluated image.
     predictions_df.to_csv(predictions_path, index=False)
-
-    # Save global metrics in JSON format.
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=4)
 
-    # Save confusion matrix for real/fake prediction only when available.
     if task in ["fake", "multitask"]:
         save_confusion_matrix(
             y_true=predictions_df["true_fake"],
@@ -272,7 +245,6 @@ def save_results(predictions_df, metrics, output_dir, task):
             output_path=output_dir / "confusion_fake.png",
         )
 
-    # Save confusion matrix for transformation prediction only when available.
     if task in ["transform", "multitask"]:
         save_confusion_matrix(
             y_true=predictions_df["true_transform"],
@@ -291,7 +263,6 @@ def print_metrics(metrics, task):
     print("\nEvaluation results")
     print("=" * 50)
 
-    # Print real/fake metrics only when available.
     if task in ["fake", "multitask"]:
         print(f"Fake accuracy:        {metrics['fake_accuracy']:.4f}")
         print(f"Fake F1 macro:        {metrics['fake_f1_macro']:.4f}")
@@ -304,7 +275,6 @@ def print_metrics(metrics, task):
             else:
                 print(f"  {name}: {value:.4f}")
 
-    # Print transformation metrics only when available.
     if task in ["transform", "multitask"]:
         print(f"Transform accuracy:   {metrics['transform_accuracy']:.4f}")
         print(f"Transform F1 macro:   {metrics['transform_f1_macro']:.4f}")
@@ -333,7 +303,7 @@ def parse_args():
         ),
     )
 
-    # CSV containing test image paths and labels.
+    #containing test image paths and labels.
     parser.add_argument(
         "--csv_path",
         type=str,
@@ -341,7 +311,7 @@ def parse_args():
         help="Path to test CSV file.",
     )
 
-    # Root folder containing the RGB image files.
+    #RGB image files.
     parser.add_argument(
         "--image_root",
         type=str,
@@ -349,7 +319,7 @@ def parse_args():
         help="Root folder containing subset RGB images.",
     )
 
-    # Root folder containing the precomputed depth maps.
+    #precomputed depth maps.
     parser.add_argument(
         "--depth_root",
         type=str,
@@ -357,7 +327,7 @@ def parse_args():
         help="Root folder containing precomputed .npy depth maps.",
     )
 
-    # Trained model checkpoint.
+    #checkpoints.
     parser.add_argument(
         "--checkpoint",
         type=str,
@@ -373,7 +343,6 @@ def parse_args():
         help="Folder where evaluation results are saved.",
     )
 
-    # Number of images processed at once.
     parser.add_argument(
         "--batch_size",
         type=int,
@@ -381,7 +350,6 @@ def parse_args():
         help="Evaluation batch size.",
     )
 
-    # Input size used by the model.
     parser.add_argument(
         "--image_size",
         type=int,
@@ -389,7 +357,6 @@ def parse_args():
         help="Input image size.",
     )
 
-    # Number of subprocesses used by the DataLoader.
     parser.add_argument(
         "--num_workers",
         type=int,
@@ -404,14 +371,14 @@ def parse_args():
         help="Use this if the checkpoint was trained without ImageNet pretrained weights.",
     )
 
-    # Use this flag when evaluating a checkpoint trained without edge consistency.
+    #without edge consistency.
     parser.add_argument(
         "--no_edge",
         action="store_true",
         help="Use this if the checkpoint was trained without the edge-consistency branch.",
     )
 
-    # Use this flag when evaluating a checkpoint trained without attention.
+    #trained without attention.
     parser.add_argument(
         "--no_attention",
         action="store_true",
@@ -424,21 +391,11 @@ def parse_args():
 def main():
     """
     Main evaluation pipeline.
-
-    Steps:
-    1. Read arguments.
-    2. Select device.
-    3. Build depth dataset and dataloader.
-    4. Build depth-based model.
-    5. Load checkpoint.
-    6. Run evaluation.
-    7. Compute and save results.
     """
 
     args = parse_args()
     print(f"Selected task: {args.task}")
 
-    # Use GPU if available, otherwise CPU.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -476,7 +433,6 @@ def main():
         device=device,
     )
 
-    # Move model to GPU/CPU.
     model = model.to(device)
 
     # Run inference on the full test set.
@@ -494,7 +450,6 @@ def main():
         task=args.task,
     )
 
-    # Save CSV, JSON, and confusion matrices.
     output_dir = Path(args.output_dir)
     save_results(
         predictions_df=predictions_df,
