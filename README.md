@@ -88,11 +88,8 @@ src/
 ├── loss.py                           # UncertaintyWeightedLoss
 ├── balanced_db.py                    # Stratified subset sampling
 ├── make_csv.py                       # CSV split generation
-├── generate_depth_map.py             # MiDaS depth map precomputation
-│
-├── results_freq.py                   # Display frequency results in notebook
-├── results_vit.py                    # Display ViT results in notebook
-└── compare_all.py                    # Full comparison table and plots
+└── generate_depth_map.py             # MiDaS depth map precomputation
+
 
 data/
 └── splits/
