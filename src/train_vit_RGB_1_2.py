@@ -132,7 +132,7 @@ def train_one_epoch(model, loader, optimizer, device, task,
 
 @torch.no_grad()
 def evaluate(model, loader, device, task,
-             lambda_fake=1.0, lambda_transform=2.0, adaptive_loss=None):
+             lambda_fake=1.0, lambda_transform=1.0, adaptive_loss=None):
     """
     Evaluate the ViT-RGB model on validation data.
     Identical to evaluate() in train_RGB.py.
@@ -195,12 +195,12 @@ def evaluate(model, loader, device, task,
 
 def main():
     """
-    Train the ViT-Small RGB multi-task model with lambda_fake=1.0, lambda_transform=2.0.
+    Train the ViT-Small RGB multi-task model with lambda_fake=1.0, lambda_transform=1.0.
 
     This script is the direct ViT alternative to:
-        python src/train_RGB.py --task multitask --lambda_fake 1.0 --lambda_transform 2.0
+        python src/train_RGB.py --task multitask --lambda_fake 1.0 --lambda_transform 1.0
 
-    The loss weighting 1.0/2.0 gives twice the importance to the transformation
+    The loss weighting 1.0/1.0 gives twice the importance to the transformation
     task compared to the fake/real task. This is useful when the transformation
     head is harder to train (which is common with 3 classes vs 2).
 
@@ -216,7 +216,7 @@ def main():
     """
 
     parser = argparse.ArgumentParser(
-        description="Train ViT-Small RGB — multitask, lambda_fake=1.0, lambda_transform=2.0."
+        description="Train ViT-Small RGB — multitask, lambda_fake=1.0, lambda_transform=1.0."
     )
 
     parser.add_argument("--train_csv",   type=str, required=True)
@@ -232,12 +232,12 @@ def main():
     parser.add_argument("--num_workers",  type=int,   default=0)
     parser.add_argument("--patience",     type=int,   default=4)
 
-    # Loss weights — fixed at 1.0/2.0 as defaults to match the experiment.
+    # Loss weights — fixed at 1.0/1.0 as defaults to match the experiment.
     # Can still be overridden from command line if needed.
     parser.add_argument("--lambda_fake",      type=float, default=1.0,
                         help="Weight of the real/fake loss (default 1.0).")
-    parser.add_argument("--lambda_transform", type=float, default=2.0,
-                        help="Weight of the transformation loss (default 2.0).")
+    parser.add_argument("--lambda_transform", type=float, default=1.0,
+                        help="Weight of the transformation loss (default 1.0).")
     parser.add_argument("--loss_weighting",   type=str,   default="manual",
                         choices=["manual", "learned"])
 
