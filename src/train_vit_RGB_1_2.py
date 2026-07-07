@@ -65,7 +65,7 @@ def compute_validation_score(val_metrics, task):
 # ---------------------------------------------------------------------------
 
 def train_one_epoch(model, loader, optimizer, device, task,
-                    lambda_fake=1.0, lambda_transform=2.0, adaptive_loss=None):
+                    lambda_fake=1.0, lambda_transform=1.0, adaptive_loss=None):
     """
     Train the ViT-RGB model for one epoch.
     Identical to train_one_epoch() in train_RGB.py — only the model class changes.
