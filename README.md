@@ -274,8 +274,9 @@ plot_comparison(df)
 | Frequency 1/1 | 90.22% | 82.44% |
 | RGB + Depth | 93.56% | ~80% |
 | RGB + Depth + Frequency | 92.44% | 80.67% |
-| ViT variants | see results/ | see results/ |
-
+| ViT RGB | 93.56% | 86.22% |
+| ViT frequency 1/1 | see results/ | see results/ |
+| ViT RGB + Depth + Frequency | 92.44% | 83.33% |
 Re-digitization is consistently the hardest condition for real/fake detection across all models. The two tasks show mild competition: configurations that improve transformation accuracy tend to slightly decrease fake accuracy.
 
 ---
