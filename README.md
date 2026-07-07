@@ -273,7 +273,7 @@ plot_comparison(df)
 | RGB multitask learned | 92.22% | 78.34% |
 | Frequency 1/1 | 90.22% | 82.44% |
 | RGB + Depth | 93.56% | ~80% |
-| RGB + Depth + Frequency | 92.44% | 80.67% |
+| RGB + Depth + Frequency | 92.44% | 81.67% |
 | ViT RGB | 93.56% | 86.22% |
 | ViT frequency 1/1 | see results/ | see results/ |
 | ViT RGB + Depth + Frequency | 92.44% | 83.33% |
