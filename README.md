@@ -85,7 +85,7 @@ src/
 ├── evaluate_vit_depth_frequency.py   # Evaluate ViT + depth + frequency
 ├── evaluation_depth_frequency_gated.py     # Evaluate gated RGB + depth + frequency model
 │
-├── loss.py                           # UncertaintyWeightedLoss (Kendall et al. 2018)
+├── loss.py                           # UncertaintyWeightedLoss
 ├── balanced_db.py                    # Stratified subset sampling
 ├── make_csv.py                       # CSV split generation
 ├── generate_depth_map.py             # MiDaS depth map precomputation
