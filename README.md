@@ -18,6 +18,13 @@ This project implements a unified multi-task deep learning framework that simult
 The core observation motivating this work is that AI-generated image detectors are typically evaluated on clean, uncompressed images. In practice, images circulating online have almost always undergone some form of post-processing — compression, re-uploading, re-digitization — that disrupts detector performance. This project investigates whether jointly predicting authenticity and post-processing type leads to more robust detection.
 
 ---
+## Experimental roadmap
+
+We first trained RGB single-task baselines for fake detection and transformation classification, then compared them with RGB multi-task models using different loss weightings. This allowed us to evaluate whether the two tasks benefit from being learned jointly.
+
+Since the RGB multi-task experiments showed trade-offs between fake detection and transformation classification, we extended the multi-task setting with additional cues. Frequency information was introduced to better capture post-processing traces, while depth maps were added to provide geometric information about scene structure. We then combined depth and frequency in a shared multimodal model and tested a gated fusion variant, where modality weights are learned separately for the two heads.
+
+Finally, ViT-based models were evaluated as an alternative to the ResNet backbone, in order to test whether global patch-level attention could improve the joint detection task.
 
 ## Dataset
 
@@ -55,11 +62,13 @@ src/
 ├── model_RGB.py                      # ResNet18 baseline (single/multi-task)
 ├── model_freq.py                     # ResNet18 + FreqEncoder (FFT branch)
 ├── model_depth_frequency.py          # ResNet18 + depth + frequency
+├── model_depth_frequency_gated.py    # Resnet18 gated RGB + depth + frequency 
 ├── model_vit_RGB.py                  # ViT-Small RGB baseline
 ├── model_vit_depth_frequency.py      # ViT-Small + depth + frequency
 │
 ├── train_RGB.py                      # Train RGB baseline (all tasks/weights)
 ├── train_depth_frequency.py          # Train RGB + depth + frequency
+├── train_depth_frequency_gated.py    # Train gated RGB + depth + frequency 
 ├── FrequencyAugumented.py            # Train frequency model (cosine + learned weights)
 ├── train_vit_RGB.py                  # Train ViT RGB baseline
 ├── train_vit_RGB_1_2.py              # Train ViT RGB — λ_fake=1.0, λ_transform=2.0
@@ -71,6 +80,7 @@ src/
 ├── evaluation_depth_frequency.py     # Evaluate RGB + depth + frequency
 ├── evaluate_vit_RGB.py               # Evaluate ViT RGB
 ├── evaluate_vit_depth_frequency.py   # Evaluate ViT + depth + frequency
+├── evaluation_depth_frequency_gated.py     # Evaluate gated RGB + depth + frequency model
 │
 ├── loss.py                           # UncertaintyWeightedLoss (Kendall et al. 2018)
 ├── balanced_db.py                    # Stratified subset sampling
@@ -133,6 +143,16 @@ The FFT map is computed as: grayscale conversion → `torch.fft.fft2` → `fftsh
 A three-branch model combining RGB (ResNet18), estimated depth (MiDaS → SmallMapEncoder), and FFT frequency (SmallMapEncoder). Features from all three branches are concatenated, fused, and optionally passed through a sigmoid attention gate before the two heads.
 
 Depth maps are precomputed with MiDaS and stored as `.npy` files. Frequency maps are computed on-the-fly.
+
+### RGB + Depth + Frequency Gated
+
+As a final ResNet-based multimodal experiment, we introduced a gated fusion mechanism on top of the RGB + Depth + Frequency architecture.
+
+The non-gated model uses a single shared fused representation for both tasks. In contrast, the gated model learns task-specific modality weights for RGB, depth, and frequency. This means that the fake detection head and the transformation classification head can rely on different combinations of the three modalities.
+
+For each task, a small gating network outputs three softmax-normalized weights, one for RGB, one for depth, and one for frequency. These weights are used to compute a weighted sum of the modality feature vectors before classification.
+
+This experiment tests whether task-specific multimodal fusion is more effective than a shared multimodal representation. However, the gated model did not improve the overall performance, suggesting that the added complexity did not provide a clear advantage in this setting.
 
 ### ViT-Small variants
 
@@ -276,6 +296,7 @@ plot_comparison(df)
 | RGB + Depth + Frequency | 92.44% | 81.67% |
 | ViT RGB | 93.56% | 86.22% |
 | ViT RGB + Depth + Frequency | 92.44% | 83.33% |
+| RGB + Depth + Frequency Gated | 91.56% | 76.00% |
 Re-digitization is consistently the hardest condition for real/fake detection across all models. The two tasks show mild competition: configurations that improve transformation accuracy tend to slightly decrease fake accuracy.
 
 ---
@@ -286,6 +307,7 @@ The ablation study on loss weights (λ_fake / λ_transform) shows that the 1/2 c
 
 The depth branch produces a strong and stable multimodal baseline. The explicit edge-consistency branch (RGB/depth disagreement) improved transformation accuracy but decreased fake accuracy, and was not selected as the primary model.
 
+The ViT-based experiments were introduced as an architectural comparison with the ResNet-based models. Overall, ViT achieved stronger results, especially on transformation classification, suggesting that global patch-level attention is more effective for capturing long-range visual and forensic patterns in this joint detection setting.
 ---
 
 ## References
