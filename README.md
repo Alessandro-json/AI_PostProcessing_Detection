@@ -57,26 +57,29 @@ Transform balance: 1,000 images per condition
 src/
 ├── dataset.py                        # RGB dataset and transforms
 ├── dataset_freq.py                   # RGB + FFT frequency dataset
+├── dataset_depth.py                  # RGB + depth dataset
 ├── dataset_depth_frequency.py        # RGB + depth + frequency dataset
 │
 ├── model_RGB.py                      # ResNet18 baseline (single/multi-task)
 ├── model_freq.py                     # ResNet18 + FreqEncoder (FFT branch)
+├── model_depth.py                    # ResNet18 + depth 
 ├── model_depth_frequency.py          # ResNet18 + depth + frequency
 ├── model_depth_frequency_gated.py    # Resnet18 gated RGB + depth + frequency 
 ├── model_vit_RGB.py                  # ViT-Small RGB baseline
 ├── model_vit_depth_frequency.py      # ViT-Small + depth + frequency
 │
 ├── train_RGB.py                      # Train RGB baseline (all tasks/weights)
+├── train_freq.py                     # Train RGB + frequency 
+├── train_depth.py                    # Train RGB + depth 
 ├── train_depth_frequency.py          # Train RGB + depth + frequency
 ├── train_depth_frequency_gated.py    # Train gated RGB + depth + frequency 
 ├── FrequencyAugumented.py            # Train frequency model (cosine + learned weights)
-├── train_vit_RGB.py                  # Train ViT RGB baseline
-├── train_vit_RGB_1_2.py              # Train ViT RGB — λ_fake=1.0, λ_transform=2.0
-├── train_vit_depth_frequency.py      # Train ViT + depth + frequency
-├── train_vit_depth_frequency_1_2.py  # Train ViT D+F — λ_fake=1.0, λ_transform=2.0
+├── train_vit_RGB_1_2.py              # Train ViT RGB 
+├── train_vit_depth_frequency_1_2.py  # Train ViT depth + frequency
 │
 ├── evaluate_RGB.py                   # Evaluate RGB baseline
 ├── evaluate_freq.py                  # Evaluate frequency model
+├── evaluate_depth.py                 # Evaluate depth model
 ├── evaluation_depth_frequency.py     # Evaluate RGB + depth + frequency
 ├── evaluate_vit_RGB.py               # Evaluate ViT RGB
 ├── evaluate_vit_depth_frequency.py   # Evaluate ViT + depth + frequency
